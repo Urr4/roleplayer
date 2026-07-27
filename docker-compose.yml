@@ -1,0 +1,112 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pre-deploy checklist (run once on the Swarm manager) — or just run ./setup.sh
+# which automates all of this.
+# ─────────────────────────────────────────────────────────────────────────────
+#  1. NFS-Share mounten (falls noch nicht geschehen):
+#       sudo mkdir -p /volume1/cloudstorage
+#       echo "<NAS_IP>:/volume1/cloudstorage /volume1/cloudstorage nfs nfsvers=4,hard,intr,noac,_netdev,nofail 0 0" | sudo tee -a /etc/fstab
+#       sudo mount -a
+#
+#  2. Datenverzeichnisse auf der NAS anlegen (einmalig, auf dem Manager-Pi):
+#       sudo mkdir -p /volume1/cloudstorage/docker-swarm-data/roleplayer
+#       sudo mkdir -p /volume1/cloudstorage/docker-swarm-data/minio/roleplayer
+#       sudo chmod 777 /volume1/cloudstorage/docker-swarm-data/roleplayer
+#       sudo chmod 777 /volume1/cloudstorage/docker-swarm-data/minio/roleplayer
+#
+#  3. Deployen:
+#       docker build --platform linux/arm64 -t roleplayer:latest .
+#       docker stack deploy -c docker-compose.yml roleplayer
+#
+#  Erreichbar unter: http://pi1:3002
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── App (Spring Boot backend + embedded React frontend) ────────────────────
+  app:
+    image: roleplayer:latest
+    environment:
+      PORT: "3002"
+      DB_PATH: /data/roleplayer.db
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_URL: http://pi1:9004
+      MINIO_BUCKET: roleplayer
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-roleplayer}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-roleplayer123}
+    volumes:
+      - sqlite-data:/data
+    networks:
+      - internal
+    ports:
+      - target: 3002
+        published: 3002
+        mode: host
+    depends_on:
+      - minio
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3002/api/sessions"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 10s
+        max_attempts: 5
+        window: 120s
+      placement:
+        constraints:
+          - node.role == manager
+
+  # ── MinIO (character sheet PDF storage) ─────────────────────────────────────
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-roleplayer}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-roleplayer123}
+    volumes:
+      - minio-data:/data
+    networks:
+      - internal
+    ports:
+      # 9004 (API) / 9005 (Console) — avoids clashing with taster (80/8443/3000)
+      # and mealplaner (3001/9002/9003)
+      - target: 9000
+        published: 9004
+        mode: host
+      - target: 9001
+        published: 9005
+        mode: host
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      placement:
+        constraints:
+          - node.role == manager
+
+networks:
+  internal:
+    driver: overlay
+    attachable: true
+
+volumes:
+  sqlite-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /volume1/cloudstorage/docker-swarm-data/roleplayer
+
+  minio-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /volume1/cloudstorage/docker-swarm-data/minio/roleplayer

@@ -1,0 +1,11 @@
+node_modules
+*/node_modules
+frontend/dist
+.git
+build
+.gradle
+*.md
+.env
+.env.*
+.idea
+data

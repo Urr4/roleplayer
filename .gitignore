@@ -1,0 +1,30 @@
+### Node.js ###
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+### Data ###
+data/
+*.db
+*.db.tmp
+
+### Env ###
+.env
+.env.*
+
+### Java / Gradle ###
+HELP.md
+.gradle
+build/
+!gradle/wrapper/gradle-wrapper.jar
+src/main/resources/static/
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+out/
+
+### VS Code ###
+.vscode/

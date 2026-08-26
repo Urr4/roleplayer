@@ -22,8 +22,35 @@ docker stack deploy -c "${SCRIPT_DIR}/docker-compose.yml" "${STACK}"
 # services. Since the tag string never changes between builds, Swarm considers
 # the service spec unchanged and skips rolling new tasks — --force makes it
 # restart the task so the freshly built image is actually used.
+#
+# If a previous deploy failed its healthcheck, the service's update state can
+# be stuck at "paused" — a plain --force update is then rejected/ignored by
+# Swarm, so clear that first by resuming/rolling back to a clean state.
+UPDATE_STATE="$(docker service inspect --format '{{.UpdateStatus.State}}' "${STACK}_app" 2>/dev/null || true)"
+if [[ "${UPDATE_STATE}" == "paused" ]]; then
+  echo "==> Service update was paused (likely a failed healthcheck) — rolling back first …"
+  docker service rollback "${STACK}_app" || true
+fi
+
 echo "==> Updating app service to new image …"
 docker service update --force --image "${IMAGE}" "${STACK}_app"
+
+# ── 4. Verify the rollout actually converged instead of pausing again ────────
+echo "==> Waiting for rollout to converge …"
+for _ in $(seq 1 30); do
+  STATE="$(docker service inspect --format '{{.UpdateStatus.State}}' "${STACK}_app" 2>/dev/null || echo "unknown")"
+  if [[ "${STATE}" == "completed" || -z "${STATE}" ]]; then
+    break
+  fi
+  if [[ "${STATE}" == "paused" ]]; then
+    echo ""
+    echo "✗ Rollout paused again — the new image is failing its healthcheck."
+    echo "  Check logs with: docker service logs ${STACK}_app"
+    docker stack ps "${STACK}" --no-trunc
+    exit 1
+  fi
+  sleep 2
+done
 
 echo ""
 echo "✓ Deployment complete. Reachable at: http://pi1:3002"

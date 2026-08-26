@@ -48,11 +48,11 @@ Events) while a recording is in progress. Audio and transcript files are both
 stored in MinIO under `{session name}/{yyyy-MM-dd}/{start}--{end}`.
 
 Transcription is done by **WhisperX** (free, open-source, German-optimized)
-running on a separate GPU machine — see
-[`docs/whisperx-setup.md`](docs/whisperx-setup.md) for setting that up, and
-[`docs/discord-bot-setup.md`](docs/discord-bot-setup.md) for the Discord bot
-(including an important ARM64/Raspberry Pi native-library caveat for voice
-support).
+running on a separate GPU machine — see the
+[`whisperx-server`](https://github.com/Urr4/whisperx-server) repo for that
+service, and [`docs/discord-bot-setup.md`](docs/discord-bot-setup.md) for the
+Discord bot (including an important ARM64/Raspberry Pi native-library caveat
+for voice support).
 
 ## Prerequisites
 
@@ -62,9 +62,10 @@ support).
   same share already used by `mealplaner`/`taster`, typically
   `/volume1/cloudstorage`).
 - A separate GPU machine (e.g. "Stefans-PC", already used for Ollama by
-  `../mealplaner`) running the WhisperX transcription service — see
-  [`docs/whisperx-setup.md`](docs/whisperx-setup.md). Set `ASR_URL` to point
-  at it (defaults to `http://Stefans-PC:9090`).
+  `../mealplaner`) running the [`whisperx-server`](https://github.com/Urr4/whisperx-server)
+  transcription service — it needs to exist and be reachable; see that
+  repo for setup instructions. Set `ASR_URL` to point at it (defaults to
+  `http://Stefans-PC:9090`).
 - Optionally, a free Discord bot token for Discord voice recording — see
   [`docs/discord-bot-setup.md`](docs/discord-bot-setup.md). Set
   `DISCORD_BOT_TOKEN`; leave it unset to disable Discord recording entirely.

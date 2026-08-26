@@ -17,7 +17,7 @@ public class SessionNpcEntity {
     private Long id;
 
     @Column(name = "session_id")
-    private String sessionId;
+    private String chronicleId;
 
     @Column(name = "npc_id")
     private String npcId;
@@ -25,8 +25,8 @@ public class SessionNpcEntity {
     protected SessionNpcEntity() {
     }
 
-    public SessionNpcEntity(String sessionId, String npcId) {
-        this.sessionId = sessionId;
+    public SessionNpcEntity(String chronicleId, String npcId) {
+        this.chronicleId = chronicleId;
         this.npcId = npcId;
     }
 
@@ -34,8 +34,8 @@ public class SessionNpcEntity {
         return id;
     }
 
-    public String getSessionId() {
-        return sessionId;
+    public String getChronicleId() {
+        return chronicleId;
     }
 
     public String getNpcId() {

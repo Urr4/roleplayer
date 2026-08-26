@@ -21,7 +21,7 @@ public class JpaNpcAdapter implements NpcRepository {
     @Override
     public Npc save(Npc npc) {
         NpcEntity saved = repository.save(new NpcEntity(npc.id(), npc.name(), npc.motive(), npc.status(),
-                npc.mood(), npc.originSessionId(), npc.createdAt()));
+                npc.mood(), npc.originChronicleId(), npc.createdAt()));
         return toDomain(saved);
     }
 
@@ -45,6 +45,6 @@ public class JpaNpcAdapter implements NpcRepository {
 
     private static Npc toDomain(NpcEntity entity) {
         return new Npc(entity.getId(), entity.getName(), entity.getMotive(), entity.getStatus(), entity.getMood(),
-                entity.getOriginSessionId(), entity.getCreatedAt());
+                entity.getOriginChronicleId(), entity.getCreatedAt());
     }
 }

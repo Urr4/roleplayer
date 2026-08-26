@@ -16,7 +16,10 @@ order in combat, and quickly generating/saving NPCs.
 
 1. **Session** — create/select the active session; manage its players and
    characters (global roster, importable across sessions); upload character
-   sheets as PDFs and view them embedded in the browser.
+   sheets as PDFs and view them embedded in the browser. Also records audio
+   for the active session (file upload, phone microphone, or a Discord voice
+   channel) and shows a live, speaker-labeled German transcript — see
+   [Audio recording & transcription](#audio-recording--transcription) below.
 2. **Initiative Tracker** — drag-and-drop sortable list of the active
    session's characters; uncheck a character to grey it out (knocked
    out/inactive). Order and checked-state are stored only in a browser
@@ -25,6 +28,32 @@ order in combat, and quickly generating/saving NPCs.
    them randomly (per-field dice buttons or the big "Random NPC" button); save
    NPCs into the active session, or import ones created in another session.
 
+## Audio recording & transcription
+
+Click the record button next to the active session (Session tab) to open a
+dialog with three sources:
+
+- **Upload File** — pick an audio file (mp3/wav/m4a/ogg/flac/webm/aac); it's
+  stored in MinIO and transcribed immediately.
+- **Microphone** — records continuously from the browser; shows **Pause
+  Recording**/**Continue Recording** and **Stop Recording** controls next to
+  the session while active. Audio is flushed to MinIO every 5 minutes (and on
+  pause/stop), and transcribed incrementally as it comes in.
+- **Discord** — give a voice channel ID; a Discord bot joins that channel and
+  records it the same way, using real Discord usernames as speaker labels
+  (no diarization needed, since Discord already separates audio per user).
+
+Opening a session shows its transcript, updating live (via Server-Sent
+Events) while a recording is in progress. Audio and transcript files are both
+stored in MinIO under `{session name}/{yyyy-MM-dd}/{start}--{end}`.
+
+Transcription is done by **WhisperX** (free, open-source, German-optimized)
+running on a separate GPU machine — see
+[`docs/whisperx-setup.md`](docs/whisperx-setup.md) for setting that up, and
+[`docs/discord-bot-setup.md`](docs/discord-bot-setup.md) for the Discord bot
+(including an important ARM64/Raspberry Pi native-library caveat for voice
+support).
+
 ## Prerequisites
 
 - A Raspberry Pi acting as a Docker Swarm manager (see `../taster` and
@@ -32,6 +61,13 @@ order in combat, and quickly generating/saving NPCs.
 - A Synology NAS reachable from the Pi with an NFS export configured (the
   same share already used by `mealplaner`/`taster`, typically
   `/volume1/cloudstorage`).
+- A separate GPU machine (e.g. "Stefans-PC", already used for Ollama by
+  `../mealplaner`) running the WhisperX transcription service — see
+  [`docs/whisperx-setup.md`](docs/whisperx-setup.md). Set `ASR_URL` to point
+  at it (defaults to `http://Stefans-PC:9090`).
+- Optionally, a free Discord bot token for Discord voice recording — see
+  [`docs/discord-bot-setup.md`](docs/discord-bot-setup.md). Set
+  `DISCORD_BOT_TOKEN`; leave it unset to disable Discord recording entirely.
 
 ## Synology NAS folders
 

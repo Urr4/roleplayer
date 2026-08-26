@@ -1,70 +1,99 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Box, Tab, Tabs, Typography } from '@mui/material';
 import CastleIcon from '@mui/icons-material/Castle';
-import SessionTab from './pages/SessionTab';
+import ExploreIcon from '@mui/icons-material/Explore';
+import ChronicleTab from './pages/ChronicleTab';
 import InitiativeTab from './pages/InitiativeTab';
 import NpcTab from './pages/NpcTab';
-import type { SessionDto } from './types';
-import { getSessions } from './api/client';
+import PlayerTab from './pages/PlayerTab';
+import type { AdventureDto, ChronicleDto } from './types';
+import { getChronicles } from './api/client';
 
-const ACTIVE_SESSION_KEY = 'roleplayer.activeSessionId';
+const ACTIVE_CHRONICLE_KEY = 'roleplayer.activeChronicleId';
 
 export default function App() {
   const [tab, setTab] = useState(0);
-  const [sessions, setSessions] = useState<SessionDto[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(
-    () => localStorage.getItem(ACTIVE_SESSION_KEY),
-  );
+  const [adventureTab, setAdventureTab] = useState(0);
+  const [chronicles, setChronicles] = useState<ChronicleDto[]>([]);
+  const [activeChronicleId, setActiveChronicleId] = useState<string | null>(() => localStorage.getItem(ACTIVE_CHRONICLE_KEY));
+  const [activeAdventure, setActiveAdventure] = useState<AdventureDto | null>(null);
 
-  const refreshSessions = () => {
-    getSessions().then(list => {
-      setSessions(list);
-      // If the previously active session no longer exists, drop the selection.
-      if (activeSessionId && !list.some(s => s.id === activeSessionId)) {
-        setActiveSessionId(null);
+  const refreshChronicles = () => {
+    getChronicles().then(list => {
+      setChronicles(list);
+      if (activeChronicleId && !list.some(chronicle => chronicle.id === activeChronicleId)) {
+        setActiveChronicleId(null);
       }
     });
   };
 
   useEffect(() => {
-    refreshSessions();
+    refreshChronicles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (activeSessionId) {
-      localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
+    if (activeChronicleId) {
+      localStorage.setItem(ACTIVE_CHRONICLE_KEY, activeChronicleId);
     } else {
-      localStorage.removeItem(ACTIVE_SESSION_KEY);
+      localStorage.removeItem(ACTIVE_CHRONICLE_KEY);
     }
-  }, [activeSessionId]);
+  }, [activeChronicleId]);
 
-  const activeSession = useMemo(
-    () => sessions.find(s => s.id === activeSessionId) ?? null,
-    [sessions, activeSessionId],
+  const activeChronicle = useMemo(
+    () => chronicles.find(chronicle => chronicle.id === activeChronicleId) ?? null,
+    [chronicles, activeChronicleId],
   );
+
+  // The active-adventure sub-bar (Character / Initiative Tracker / NPC Helper)
+  // only makes sense while an adventure is running; fall back to the
+  // Chronicle tab whenever it disappears so we don't get stuck on a hidden tab.
+  const effectiveTab = !activeAdventure && tab === 1 ? 0 : tab;
 
   return (
     <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', py: { xs: 2, sm: 4 } }}>
       <Box sx={{ width: '100%', maxWidth: 1100, px: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2, justifyContent: 'center' }}>
-          <CastleIcon sx={{ color: '#e8d9b5', fontSize: 34 }} />
-          <Typography variant="h4" sx={{ color: '#e8d9b5', textShadow: '2px 2px 0 #2b1a10' }}>
-            Roleplayer &mdash; GM's Board
+          <CastleIcon sx={{ color: 'primary.light', fontSize: 34 }} />
+          <Typography variant="h4" sx={{ color: 'text.primary' }}>
+            Roleplayer
           </Typography>
         </Box>
 
-        {activeSession && (
-          <Typography variant="subtitle1" align="center" sx={{ color: '#d4ac66', mb: 1, fontStyle: 'italic' }}>
-            Current session: <strong>{activeSession.name}</strong>
+        {activeChronicle && (
+          <Typography variant="subtitle1" align="center" sx={{ color: 'text.secondary', mb: 1 }}>
+            Current chronicle: <strong>{activeChronicle.name}</strong>
+            {activeAdventure && (
+              <>
+                {' '}
+                · Active adventure: <strong>{activeAdventure.name}</strong>
+              </>
+            )}
           </Typography>
         )}
 
-        <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="fullWidth">
-          <Tab label="Session" />
-          <Tab label="Initiative Tracker" disabled={!activeSession} />
-          <Tab label="NPC Helper" disabled={!activeSession} />
+        <Tabs value={effectiveTab} onChange={(_, value) => setTab(value)} variant="fullWidth">
+          <Tab label="Chronicles" />
+          <Tab
+            icon={<ExploreIcon fontSize="small" />}
+            iconPosition="start"
+            label={activeAdventure ? activeAdventure.name : 'Adventure'}
+            disabled={!activeAdventure}
+          />
+          <Tab label="Players" />
         </Tabs>
+
+        {effectiveTab === 1 && activeAdventure && (
+          <Tabs
+            value={adventureTab}
+            onChange={(_, value) => setAdventureTab(value)}
+            variant="fullWidth"
+            sx={{ mt: 1, mb: 1 }}
+          >
+            <Tab label="Initiative Tracker" />
+            <Tab label="NPC Helper" />
+          </Tabs>
+        )}
 
         <Box
           className="torn-edge"
@@ -72,24 +101,26 @@ export default function App() {
             bgcolor: 'background.paper',
             p: { xs: 2, sm: 3 },
             minHeight: 480,
-            boxShadow: '0 6px 20px rgba(0,0,0,0.45)',
+            borderRadius: 3,
+            boxShadow: '0 16px 40px rgba(15, 23, 42, 0.24)',
           }}
         >
-          {tab === 0 && (
-            <SessionTab
-              sessions={sessions}
-              activeSessionId={activeSessionId}
-              onSelectSession={setActiveSessionId}
-              onSessionsChanged={refreshSessions}
+          {effectiveTab === 0 && (
+            <ChronicleTab
+              chronicles={chronicles}
+              activeChronicleId={activeChronicleId}
+              onSelectChronicle={setActiveChronicleId}
+              onChroniclesChanged={refreshChronicles}
+              onActiveAdventureChanged={setActiveAdventure}
             />
           )}
-          {tab === 1 && activeSession && <InitiativeTab session={activeSession} />}
-          {tab === 2 && activeSession && <NpcTab session={activeSession} />}
-          {tab !== 0 && !activeSession && (
-            <Typography align="center" sx={{ mt: 4 }}>
-              Select or create a session in the Session tab first.
-            </Typography>
+          {effectiveTab === 1 && activeChronicle && activeAdventure && (
+            <>
+              {adventureTab === 0 && <InitiativeTab chronicle={activeChronicle} />}
+              {adventureTab === 1 && <NpcTab chronicle={activeChronicle} />}
+            </>
           )}
+          {effectiveTab === 2 && <PlayerTab />}
         </Box>
       </Box>
     </Box>

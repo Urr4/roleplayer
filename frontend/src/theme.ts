@@ -1,73 +1,85 @@
 import { createTheme } from '@mui/material/styles';
 
-// ── "Tavern Notice Board" theme ────────────────────────────────────────────────
-// Warm parchment/wood palette with wax-seal accents, carved-wood shapes and a
-// fantasy display font for headings — meant to feel like the GM's corkboard in
-// the corner of the tavern, not a corporate dashboard.
 const theme = createTheme({
   palette: {
-    mode: 'light',
+    mode: 'dark',
     primary: {
-      main: '#7a2e1d', // wax-seal red
-      light: '#a3452d',
-      dark: '#551f13',
-      contrastText: '#f6ecd9',
+      main: '#7c9cff',
+      light: '#a9beff',
+      dark: '#5879dd',
+      contrastText: '#0f172a',
     },
     secondary: {
-      main: '#b98b3e', // tarnished gold
-      light: '#d4ac66',
-      dark: '#8a672a',
-      contrastText: '#2b1a10',
+      main: '#5ec7b7',
+      light: '#8ce0d4',
+      dark: '#3c9b8d',
+      contrastText: '#081a1f',
     },
     background: {
-      default: '#e8d9b5', // parchment
-      paper: '#f3e6c4',
+      default: '#111827',
+      paper: '#1f2937',
     },
     text: {
-      primary: '#3a2416', // dark ink-brown
-      secondary: '#6b4c30',
+      primary: '#f3f4f6',
+      secondary: '#cbd5e1',
+      disabled: '#64748b',
     },
-    divider: '#a9834f',
-  },
-  typography: {
-    fontFamily: '"IM Fell English", "Georgia", serif',
-    h1: { fontFamily: '"Cinzel", serif', fontWeight: 700, letterSpacing: 1 },
-    h2: { fontFamily: '"Cinzel", serif', fontWeight: 700, letterSpacing: 1 },
-    h3: { fontFamily: '"Cinzel", serif', fontWeight: 600, letterSpacing: 0.5 },
-    h4: { fontFamily: '"Cinzel", serif', fontWeight: 600, letterSpacing: 0.5 },
-    h5: { fontFamily: '"Cinzel", serif', fontWeight: 600 },
-    h6: { fontFamily: '"Cinzel", serif', fontWeight: 600 },
-    button: { fontFamily: '"Cinzel", serif', letterSpacing: 0.5 },
+    divider: 'rgba(148, 163, 184, 0.2)',
+    action: {
+      active: '#cbd5e1',
+      hover: 'rgba(124, 156, 255, 0.08)',
+      selected: 'rgba(124, 156, 255, 0.16)',
+      disabled: 'rgba(148, 163, 184, 0.38)',
+      disabledBackground: 'rgba(148, 163, 184, 0.12)',
+    },
   },
   shape: {
-    borderRadius: 4,
+    borderRadius: 12,
+  },
+  typography: {
+    h4: { fontWeight: 700 },
+    h5: { fontWeight: 600 },
+    h6: { fontWeight: 600 },
+    subtitle1: { fontWeight: 500 },
+    button: { textTransform: 'none', fontWeight: 600 },
   },
   components: {
-    MuiButton: {
+    MuiCssBaseline: {
       styleOverrides: {
-        root: {
-          borderRadius: 4,
-          textTransform: 'none',
-          fontWeight: 600,
-          border: '1px solid rgba(58,36,22,0.35)',
-          boxShadow: '0 2px 0 rgba(58,36,22,0.25)',
+        body: {
+          backgroundColor: '#111827',
+          backgroundImage: 'radial-gradient(circle at top, rgba(124, 156, 255, 0.08), transparent 45%)',
         },
       },
     },
     MuiPaper: {
       styleOverrides: {
         root: {
-          backgroundImage:
-            'repeating-linear-gradient(0deg, rgba(120,88,45,0.05) 0px, rgba(120,88,45,0.05) 1px, transparent 1px, transparent 3px)',
+          backgroundImage: 'none',
+          border: '1px solid rgba(148, 163, 184, 0.12)',
         },
       },
     },
     MuiCard: {
       styleOverrides: {
         root: {
-          border: '1px solid rgba(58,36,22,0.35)',
-          boxShadow: '0 3px 8px rgba(37,20,8,0.35)',
-          backgroundColor: '#f3e6c4',
+          backgroundImage: 'none',
+          boxShadow: '0 12px 30px rgba(15, 23, 42, 0.28)',
+          border: '1px solid rgba(148, 163, 184, 0.12)',
+        },
+      },
+    },
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          borderRadius: 10,
+          boxShadow: 'none',
+        },
+        contained: {
+          boxShadow: 'none',
+          '&:hover': {
+            boxShadow: 'none',
+          },
         },
       },
     },
@@ -75,47 +87,57 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           minHeight: 52,
-          backgroundColor: '#5b3a24',
-          borderRadius: 4,
-          padding: '4px 4px 0 4px',
+          backgroundColor: '#1f2937',
+          border: '1px solid rgba(148, 163, 184, 0.12)',
+          borderRadius: 12,
+          padding: 4,
         },
         indicator: {
-          height: 4,
-          backgroundColor: '#b98b3e',
+          height: '100%',
+          borderRadius: 10,
+          backgroundColor: 'rgba(124, 156, 255, 0.18)',
+          zIndex: 0,
         },
       },
     },
     MuiTab: {
       styleOverrides: {
         root: {
-          fontFamily: '"Cinzel", serif',
-          color: '#e8d9b5',
+          minHeight: 44,
+          borderRadius: 10,
+          color: '#94a3b8',
           fontWeight: 600,
-          letterSpacing: 0.5,
-          borderRadius: '4px 4px 0 0',
-          border: '1px solid #3d2515',
-          borderBottom: 'none',
-          marginRight: 4,
-          backgroundColor: '#4a2e1c',
+          zIndex: 1,
+          transition: 'color 0.2s ease, background-color 0.2s ease',
           '&.Mui-selected': {
-            backgroundColor: '#7a2e1d',
-            color: '#f6ecd9',
+            color: '#f8fafc',
+          },
+          '&.Mui-disabled': {
+            color: 'rgba(148, 163, 184, 0.5)',
+          },
+        },
+      },
+    },
+    MuiOutlinedInput: {
+      styleOverrides: {
+        root: {
+          backgroundColor: 'rgba(15, 23, 42, 0.35)',
+          '& fieldset': {
+            borderColor: 'rgba(148, 163, 184, 0.24)',
+          },
+          '&:hover fieldset': {
+            borderColor: 'rgba(148, 163, 184, 0.4)',
+          },
+          '&.Mui-focused fieldset': {
+            borderColor: '#7c9cff',
           },
         },
       },
     },
     MuiChip: {
       styleOverrides: {
-        root: { borderRadius: 4, fontWeight: 600 },
-      },
-    },
-    MuiTextField: {
-      styleOverrides: {
         root: {
-          '& .MuiOutlinedInput-root': {
-            borderRadius: 4,
-            backgroundColor: 'rgba(255,255,255,0.35)',
-          },
+          borderRadius: 999,
         },
       },
     },

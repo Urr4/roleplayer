@@ -1,7 +1,17 @@
-export interface SessionDto {
+export interface ChronicleDto {
   id: string;
   name: string;
   createdAt: string;
+}
+
+export interface AdventureDto {
+  id: string;
+  chronicleId: string;
+  name: string;
+  status: 'PLANNED' | 'ACTIVE' | 'COMPLETED';
+  createdAt: string;
+  startedAt: string | null;
+  endedAt: string | null;
 }
 
 export interface PlayerDto {
@@ -11,10 +21,18 @@ export interface PlayerDto {
 
 export interface CharacterDto {
   id: string;
+  chronicleId: string;
   name: string;
   playerId: string;
   hasSheet: boolean;
   createdAt: string;
+}
+
+export interface AdventureCharacterDto {
+  id: string;
+  adventureId: string;
+  characterId: string;
+  addedAt: string;
 }
 
 export type NpcStatus = 'HIGHER' | 'EQUAL' | 'LOWER';
@@ -25,7 +43,7 @@ export interface NpcDto {
   motive: string;
   status: NpcStatus;
   mood: string;
-  originSessionId: string | null;
+  originChronicleId: string | null;
   createdAt: string | null;
 }
 
@@ -33,4 +51,30 @@ export interface AttributePools {
   motives: string[];
   moods: string[];
   statuses: NpcStatus[];
+}
+
+// ── Recordings & transcripts ─────────────────────────────────────────────────
+export type RecordingSource = 'UPLOAD' | 'MICROPHONE' | 'DISCORD';
+export type RecordingStatus = 'RECORDING' | 'PAUSED' | 'STOPPED' | 'PROCESSING' | 'DONE' | 'FAILED';
+
+export interface RecordingDto {
+  id: string;
+  chronicleId: string;
+  adventureId: string;
+  source: RecordingSource;
+  status: RecordingStatus;
+  startedAt: string;
+  endedAt: string | null;
+  audioObjectKey: string | null;
+  transcriptObjectKey: string | null;
+}
+
+export interface TranscriptSegmentDto {
+  id: string;
+  recordingId: string;
+  speakerLabel: string;
+  startMs: number;
+  endMs: number;
+  text: string;
+  createdAt: string;
 }

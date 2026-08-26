@@ -10,34 +10,12 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * In-memory stand-in for {@link CharacterRepository}, active only in the
- * {@code local} profile. Data is lost on restart.
- */
 @Component
 @Profile("local")
 public class InMemoryCharacterRepository implements CharacterRepository {
-
     private final Map<String, Character> store = new ConcurrentHashMap<>();
-
-    @Override
-    public Character save(Character character) {
-        store.put(character.id(), character);
-        return character;
-    }
-
-    @Override
-    public List<Character> findAll() {
-        return List.copyOf(store.values());
-    }
-
-    @Override
-    public List<Character> findByIds(List<String> ids) {
-        return ids.stream().map(store::get).filter(java.util.Objects::nonNull).toList();
-    }
-
-    @Override
-    public Optional<Character> findById(String id) {
-        return Optional.ofNullable(store.get(id));
-    }
+    @Override public Character save(Character character) { store.put(character.id(), character); return character; }
+    @Override public List<Character> findAll() { return List.copyOf(store.values()); }
+    @Override public List<Character> findByChronicleId(String chronicleId) { return store.values().stream().filter(c -> c.chronicleId().equals(chronicleId)).toList(); }
+    @Override public Optional<Character> findById(String id) { return Optional.ofNullable(store.get(id)); }
 }

@@ -18,19 +18,19 @@ import CasinoIcon from '@mui/icons-material/Casino';
 import SaveIcon from '@mui/icons-material/Save';
 import CloseIcon from '@mui/icons-material/Close';
 import TornCard from '../components/TornCard';
-import type { AttributePools, NpcDto, NpcStatus, SessionDto } from '../types';
+import type { AttributePools, ChronicleDto, NpcDto, NpcStatus } from '../types';
 import {
   getAllNpcs,
   getAttributePools,
+  getChronicleNpcs,
   getRandomNpc,
-  getSessionNpcs,
-  importNpcIntoSession,
-  removeNpcFromSession,
-  saveNpcInSession,
+  importNpcIntoChronicle,
+  removeNpcFromChronicle,
+  saveNpcInChronicle,
 } from '../api/client';
 
 interface Props {
-  session: SessionDto;
+  chronicle: ChronicleDto;
 }
 
 const STATUS_LABEL: Record<NpcStatus, string> = {
@@ -45,27 +45,27 @@ const emptyDraft: NpcDto = {
   motive: '',
   status: 'EQUAL',
   mood: '',
-  originSessionId: null,
+  originChronicleId: null,
   createdAt: null,
 };
 
-export default function NpcTab({ session }: Props) {
+export default function NpcTab({ chronicle }: Props) {
   const [pools, setPools] = useState<AttributePools>({ motives: [], moods: [], statuses: ['HIGHER', 'EQUAL', 'LOWER'] });
-  const [sessionNpcs, setSessionNpcs] = useState<NpcDto[]>([]);
+  const [chronicleNpcs, setChronicleNpcs] = useState<NpcDto[]>([]);
   const [allNpcs, setAllNpcs] = useState<NpcDto[]>([]);
   const [selected, setSelected] = useState<NpcDto | null>(null);
   const [draft, setDraft] = useState<NpcDto>(emptyDraft);
   const [importTarget, setImportTarget] = useState<NpcDto | null>(null);
 
-  const refreshSessionNpcs = () => getSessionNpcs(session.id).then(setSessionNpcs);
+  const refreshChronicleNpcs = () => getChronicleNpcs(chronicle.id).then(setChronicleNpcs);
   const refreshAllNpcs = () => getAllNpcs().then(setAllNpcs);
 
   useEffect(() => {
     getAttributePools().then(setPools);
-    refreshSessionNpcs();
+    refreshChronicleNpcs();
     refreshAllNpcs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.id]);
+  }, [chronicle.id]);
 
   const selectNpc = (npc: NpcDto) => {
     setSelected(npc);
@@ -95,35 +95,34 @@ export default function NpcTab({ session }: Props) {
 
   const handleSave = async () => {
     if (!draft.name.trim() || !draft.motive.trim() || !draft.mood.trim()) return;
-    await saveNpcInSession(session.id, {
+    await saveNpcInChronicle(chronicle.id, {
       name: draft.name.trim(),
       motive: draft.motive,
       status: draft.status,
       mood: draft.mood,
     });
     startNewDraft();
-    refreshSessionNpcs();
+    refreshChronicleNpcs();
     refreshAllNpcs();
   };
 
   const handleImport = async () => {
     if (!importTarget?.id) return;
-    await importNpcIntoSession(session.id, importTarget.id);
+    await importNpcIntoChronicle(chronicle.id, importTarget.id);
     setImportTarget(null);
-    refreshSessionNpcs();
+    refreshChronicleNpcs();
   };
 
   const handleRemove = async (npcId: string) => {
-    await removeNpcFromSession(session.id, npcId);
+    await removeNpcFromChronicle(chronicle.id, npcId);
     if (selected?.id === npcId) startNewDraft();
-    refreshSessionNpcs();
+    refreshChronicleNpcs();
   };
 
-  const importableNpcs = allNpcs.filter(n => !sessionNpcs.some(sn => sn.id === n.id));
+  const importableNpcs = allNpcs.filter(npc => !chronicleNpcs.some(linkedNpc => linkedNpc.id === npc.id));
 
   return (
     <Grid container spacing={3}>
-      {/* ── Rogues' gallery ─────────────────────────────────────────────── */}
       <Grid size={{ xs: 12, md: 4 }}>
         <Typography variant="h5" gutterBottom>
           🖼️ Rogues' Gallery
@@ -132,25 +131,18 @@ export default function NpcTab({ session }: Props) {
           <Autocomplete
             sx={{ flexGrow: 1 }}
             options={importableNpcs}
-            getOptionLabel={n => n.name}
+            getOptionLabel={npc => npc.name}
             value={importTarget}
-            onChange={(_, v) => setImportTarget(v)}
-            renderInput={params => <TextField {...params} label="Import NPC from another session" size="small" />}
+            onChange={(_, value) => setImportTarget(value)}
+            renderInput={params => <TextField {...params} label="Import NPC from another chronicle" size="small" />}
           />
         </Stack>
-        <Button
-          fullWidth
-          size="small"
-          variant="outlined"
-          onClick={handleImport}
-          disabled={!importTarget}
-          sx={{ mb: 2 }}
-        >
-          Pin to this Board
+        <Button fullWidth size="small" variant="outlined" onClick={handleImport} disabled={!importTarget} sx={{ mb: 2 }}>
+          Pin to this board
         </Button>
 
         <List>
-          {sessionNpcs.map(npc => (
+          {chronicleNpcs.map(npc => (
             <ListItemButton
               key={npc.id}
               selected={selected?.id === npc.id}
@@ -160,18 +152,18 @@ export default function NpcTab({ session }: Props) {
               <ListItemText primary={npc.name} secondary={`${npc.motive} · ${npc.mood}`} />
               <IconButton
                 size="small"
-                onClick={e => {
-                  e.stopPropagation();
-                  handleRemove(npc.id!);
+                onClick={event => {
+                  event.stopPropagation();
+                  void handleRemove(npc.id!);
                 }}
               >
                 <CloseIcon fontSize="small" />
               </IconButton>
             </ListItemButton>
           ))}
-          {sessionNpcs.length === 0 && (
+          {chronicleNpcs.length === 0 && (
             <Typography color="text.secondary" sx={{ fontStyle: 'italic' }}>
-              No NPCs pinned to this session's board yet.
+              No NPCs pinned to this chronicle yet.
             </Typography>
           )}
         </List>
@@ -181,34 +173,17 @@ export default function NpcTab({ session }: Props) {
         <Divider orientation="vertical" sx={{ height: '100%' }} />
       </Grid>
 
-      {/* ── NPC creation / view form ───────────────────────────────────── */}
       <Grid size={{ xs: 12, md: 7 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
           <Typography variant="h5">🎭 Conjure an NPC</Typography>
-          <Button
-            variant="contained"
-            color="secondary"
-            size="large"
-            startIcon={<CasinoIcon />}
-            onClick={rollRandomNpc}
-            sx={{
-              borderRadius: '50% / 40%',
-              px: 3,
-              boxShadow: '0 0 0 3px #7a2e1d, 0 4px 10px rgba(0,0,0,0.4)',
-            }}
-          >
+          <Button variant="contained" color="secondary" size="large" startIcon={<CasinoIcon />} onClick={rollRandomNpc} sx={{ px: 3, boxShadow: 'none' }}>
             Random NPC
           </Button>
         </Stack>
 
         <TornCard rotate={-0.5} sx={{ maxWidth: 520 }}>
           <Stack spacing={2}>
-            <TextField
-              label="Name"
-              value={draft.name}
-              onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
-              fullWidth
-            />
+            <TextField label="Name" value={draft.name} onChange={event => setDraft(d => ({ ...d, name: event.target.value }))} fullWidth />
 
             <Stack direction="row" spacing={1} alignItems="center">
               <Autocomplete
@@ -216,7 +191,7 @@ export default function NpcTab({ session }: Props) {
                 sx={{ flexGrow: 1 }}
                 options={pools.motives}
                 value={draft.motive}
-                onInputChange={(_, v) => setDraft(d => ({ ...d, motive: v }))}
+                onInputChange={(_, value) => setDraft(d => ({ ...d, motive: value }))}
                 renderInput={params => <TextField {...params} label="Motive" size="small" />}
               />
               <IconButton onClick={() => rollField('motive')} title="Roll a random motive">
@@ -229,13 +204,13 @@ export default function NpcTab({ session }: Props) {
                 select
                 label="Standing"
                 value={draft.status}
-                onChange={e => setDraft(d => ({ ...d, status: e.target.value as NpcStatus }))}
+                onChange={event => setDraft(d => ({ ...d, status: event.target.value as NpcStatus }))}
                 size="small"
                 fullWidth
               >
-                {pools.statuses.map(s => (
-                  <MenuItem key={s} value={s}>
-                    {STATUS_LABEL[s]}
+                {pools.statuses.map(status => (
+                  <MenuItem key={status} value={status}>
+                    {STATUS_LABEL[status]}
                   </MenuItem>
                 ))}
               </TextField>
@@ -250,7 +225,7 @@ export default function NpcTab({ session }: Props) {
                 sx={{ flexGrow: 1 }}
                 options={pools.moods}
                 value={draft.mood}
-                onInputChange={(_, v) => setDraft(d => ({ ...d, mood: v }))}
+                onInputChange={(_, value) => setDraft(d => ({ ...d, mood: value }))}
                 renderInput={params => <TextField {...params} label="Mood" size="small" />}
               />
               <IconButton onClick={() => rollField('mood')} title="Roll a random mood">
@@ -273,7 +248,7 @@ export default function NpcTab({ session }: Props) {
                 onClick={handleSave}
                 disabled={!draft.name.trim() || !draft.motive.trim() || !draft.mood.trim()}
               >
-                Pin to Board
+                Pin to board
               </Button>
               <Button onClick={startNewDraft}>Clear</Button>
             </Stack>

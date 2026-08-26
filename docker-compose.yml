@@ -35,6 +35,8 @@ services:
       MINIO_BUCKET: roleplayer
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-roleplayer}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-roleplayer123}
+      ASR_URL: ${ASR_URL:-http://Stefans-PC:9090}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
     volumes:
       - sqlite-data:/data
     networks:

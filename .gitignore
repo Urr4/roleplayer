@@ -25,6 +25,8 @@ src/main/resources/static/
 *.iml
 *.ipr
 out/
+!src/main/java/de/urr4/rp/roleplayer/domain/port/out/
+!src/main/java/de/urr4/rp/roleplayer/domain/port/out/*.java
 
 ### VS Code ###
 .vscode/

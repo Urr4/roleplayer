@@ -2,8 +2,9 @@ package de.urr4.rp.roleplayer.application;
 
 import de.urr4.rp.roleplayer.domain.model.Character;
 import de.urr4.rp.roleplayer.domain.port.out.CharacterRepository;
+import de.urr4.rp.roleplayer.domain.port.out.ChronicleRepository;
 import de.urr4.rp.roleplayer.domain.port.out.PdfStore;
-import de.urr4.rp.roleplayer.domain.port.out.SessionCharacterLinkRepository;
+import de.urr4.rp.roleplayer.domain.port.out.PlayerRepository;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -16,50 +17,53 @@ import java.util.UUID;
 public class CharacterService {
 
     private final CharacterRepository characterRepository;
-    private final SessionCharacterLinkRepository linkRepository;
+    private final ChronicleRepository chronicleRepository;
+    private final PlayerRepository playerRepository;
     private final PdfStore pdfStore;
 
-    public CharacterService(CharacterRepository characterRepository, SessionCharacterLinkRepository linkRepository,
-                             PdfStore pdfStore) {
+    public CharacterService(CharacterRepository characterRepository, ChronicleRepository chronicleRepository,
+                            PlayerRepository playerRepository, PdfStore pdfStore) {
         this.characterRepository = characterRepository;
-        this.linkRepository = linkRepository;
+        this.chronicleRepository = chronicleRepository;
+        this.playerRepository = playerRepository;
         this.pdfStore = pdfStore;
     }
 
-    public Character createCharacter(String name, String playerId, byte[] pdfBytes) {
+    public Character createCharacter(String chronicleId, String name, String playerId, byte[] pdfBytes) {
+        requireChronicle(chronicleId);
+        requirePlayer(playerId);
         String pdfObjectKey = pdfBytes != null && pdfBytes.length > 0 ? pdfStore.store(pdfBytes) : null;
-        Character character = new Character(UUID.randomUUID().toString(), name, playerId, pdfObjectKey,
+        Character character = new Character(UUID.randomUUID().toString(), chronicleId, name, playerId, pdfObjectKey,
                 Instant.now());
         return characterRepository.save(character);
     }
 
     public Character replaceSheet(String characterId, byte[] pdfBytes) {
-        Character existing = characterRepository.findById(characterId)
-                .orElseThrow(() -> new NoSuchElementException("Character not found: " + characterId));
+        Character existing = requireCharacter(characterId);
         if (existing.pdfObjectKey() != null) {
             pdfStore.delete(existing.pdfObjectKey());
         }
         String newKey = pdfStore.store(pdfBytes);
-        Character updated = new Character(existing.id(), existing.name(), existing.playerId(), newKey,
-                existing.createdAt());
+        Character updated = new Character(existing.id(), existing.chronicleId(), existing.name(), existing.playerId(),
+                newKey, existing.createdAt());
         return characterRepository.save(updated);
+    }
+
+    public Character importIntoChronicle(String characterId, String targetChronicleId) {
+        Character existing = requireCharacter(characterId);
+        requireChronicle(targetChronicleId);
+        Character cloned = new Character(UUID.randomUUID().toString(), targetChronicleId, existing.name(),
+                existing.playerId(), existing.pdfObjectKey(), Instant.now());
+        return characterRepository.save(cloned);
     }
 
     public List<Character> listAllCharacters() {
         return characterRepository.findAll();
     }
 
-    public List<Character> listSessionCharacters(String sessionId) {
-        List<String> ids = linkRepository.findCharacterIdsBySession(sessionId);
-        return characterRepository.findByIds(ids);
-    }
-
-    public void linkToSession(String sessionId, String characterId) {
-        linkRepository.link(sessionId, characterId);
-    }
-
-    public void unlinkFromSession(String sessionId, String characterId) {
-        linkRepository.unlink(sessionId, characterId);
+    public List<Character> listByChronicle(String chronicleId) {
+        requireChronicle(chronicleId);
+        return characterRepository.findByChronicleId(chronicleId);
     }
 
     public Optional<String> getSheetUrl(String characterId) {
@@ -67,5 +71,20 @@ public class CharacterService {
                 .map(Character::pdfObjectKey)
                 .filter(key -> key != null && !key.isBlank())
                 .map(pdfStore::presignedUrl);
+    }
+
+    private void requireChronicle(String chronicleId) {
+        chronicleRepository.findById(chronicleId)
+                .orElseThrow(() -> new NoSuchElementException("Chronicle not found: " + chronicleId));
+    }
+
+    private void requirePlayer(String playerId) {
+        playerRepository.findById(playerId)
+                .orElseThrow(() -> new NoSuchElementException("Player not found: " + playerId));
+    }
+
+    private Character requireCharacter(String characterId) {
+        return characterRepository.findById(characterId)
+                .orElseThrow(() -> new NoSuchElementException("Character not found: " + characterId));
     }
 }

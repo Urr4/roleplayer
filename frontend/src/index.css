@@ -6,30 +6,20 @@ body,
 
 body {
   margin: 0;
-  /* Wood-grain backdrop behind the parchment content area */
-  background-color: #4a2e1c;
-  background-image:
-    repeating-linear-gradient(90deg, rgba(0,0,0,0.08) 0px, rgba(0,0,0,0.08) 2px, transparent 2px, transparent 40px),
-    repeating-linear-gradient(0deg, rgba(255,255,255,0.03) 0px, rgba(255,255,255,0.03) 1px, transparent 1px, transparent 6px);
+  background-color: #111827;
 }
 
-/* Torn / deckled parchment edge, used for NPC "wanted poster" and character cards */
 .torn-edge {
-  clip-path: polygon(
-    0% 2%, 3% 0%, 8% 3%, 14% 0%, 20% 2%, 27% 0%, 34% 3%, 41% 0%, 48% 2%, 55% 0%,
-    62% 3%, 69% 0%, 76% 2%, 83% 0%, 90% 3%, 96% 0%, 100% 2%,
-    100% 98%, 96% 100%, 90% 97%, 83% 100%, 76% 98%, 69% 100%, 62% 97%, 55% 100%,
-    48% 98%, 41% 100%, 34% 97%, 27% 100%, 20% 98%, 14% 100%, 8% 97%, 3% 100%, 0% 98%
-  );
+  clip-path: none;
 }
 
 ::-webkit-scrollbar {
   width: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #8a672a;
-  border-radius: 4px;
+  background: #475569;
+  border-radius: 999px;
 }
 ::-webkit-scrollbar-track {
-  background: #3d2515;
+  background: #0f172a;
 }

@@ -17,19 +17,19 @@ public class JpaSessionNpcLinkAdapter implements SessionNpcLinkRepository {
     }
 
     @Override
-    public void link(String sessionId, String npcId) {
-        repository.findBySessionIdAndNpcId(sessionId, npcId)
-                .orElseGet(() -> repository.save(new SessionNpcEntity(sessionId, npcId)));
+    public void link(String chronicleId, String npcId) {
+        repository.findByChronicleIdAndNpcId(chronicleId, npcId)
+                .orElseGet(() -> repository.save(new SessionNpcEntity(chronicleId, npcId)));
     }
 
     @Override
-    public void unlink(String sessionId, String npcId) {
-        repository.findBySessionIdAndNpcId(sessionId, npcId).ifPresent(repository::delete);
+    public void unlink(String chronicleId, String npcId) {
+        repository.findByChronicleIdAndNpcId(chronicleId, npcId).ifPresent(repository::delete);
     }
 
     @Override
-    public List<String> findNpcIdsBySession(String sessionId) {
-        return repository.findBySessionId(sessionId).stream()
+    public List<String> findNpcIdsByChronicle(String chronicleId) {
+        return repository.findByChronicleId(chronicleId).stream()
                 .map(SessionNpcEntity::getNpcId)
                 .toList();
     }

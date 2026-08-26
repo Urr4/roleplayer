@@ -2,10 +2,13 @@ package de.urr4.rp.roleplayer.web;
 
 import de.urr4.rp.roleplayer.application.CharacterService;
 import de.urr4.rp.roleplayer.web.dto.CharacterDto;
+import de.urr4.rp.roleplayer.web.dto.ImportCharacterRequest;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -17,7 +20,6 @@ import java.io.UncheckedIOException;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/characters")
 public class CharacterController {
 
     private final CharacterService characterService;
@@ -26,23 +28,34 @@ public class CharacterController {
         this.characterService = characterService;
     }
 
-    @GetMapping
+    @GetMapping("/api/characters")
     public List<CharacterDto> listAll() {
         return characterService.listAllCharacters().stream().map(CharacterDto::from).toList();
     }
 
-    @PostMapping
-    public CharacterDto create(@RequestParam String name, @RequestParam String playerId,
-                                @RequestPart(required = false) MultipartFile sheet) {
-        return CharacterDto.from(characterService.createCharacter(name, playerId, bytesOf(sheet)));
+    @GetMapping("/api/chronicles/{chronicleId}/characters")
+    public List<CharacterDto> listByChronicle(@PathVariable String chronicleId) {
+        return characterService.listByChronicle(chronicleId).stream().map(CharacterDto::from).toList();
     }
 
-    @PostMapping("/{id}/sheet")
+    @PostMapping("/api/chronicles/{chronicleId}/characters")
+    public CharacterDto create(@PathVariable String chronicleId, @RequestParam String name, @RequestParam String playerId,
+                               @RequestPart(required = false) MultipartFile sheet) {
+        return CharacterDto.from(characterService.createCharacter(chronicleId, name, playerId, bytesOf(sheet)));
+    }
+
+    @PostMapping("/api/chronicles/{chronicleId}/characters/import")
+    public CharacterDto importIntoChronicle(@PathVariable String chronicleId,
+                                            @Valid @RequestBody ImportCharacterRequest request) {
+        return CharacterDto.from(characterService.importIntoChronicle(request.characterId(), chronicleId));
+    }
+
+    @PostMapping("/api/characters/{id}/sheet")
     public CharacterDto replaceSheet(@PathVariable String id, @RequestPart MultipartFile sheet) {
         return CharacterDto.from(characterService.replaceSheet(id, bytesOf(sheet)));
     }
 
-    @GetMapping("/{id}/sheet-url")
+    @GetMapping("/api/characters/{id}/sheet-url")
     public ResponseEntity<SheetUrlResponse> sheetUrl(@PathVariable String id) {
         return characterService.getSheetUrl(id)
                 .map(url -> ResponseEntity.ok(new SheetUrlResponse(url)))
@@ -60,6 +73,5 @@ public class CharacterController {
         }
     }
 
-    public record SheetUrlResponse(String url) {
-    }
+    public record SheetUrlResponse(String url) { }
 }

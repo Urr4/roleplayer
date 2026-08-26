@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Optional;
 
 public interface SpringDataSessionNpcRepository extends JpaRepository<SessionNpcEntity, Long> {
-    List<SessionNpcEntity> findBySessionId(String sessionId);
+    List<SessionNpcEntity> findByChronicleId(String chronicleId);
 
-    Optional<SessionNpcEntity> findBySessionIdAndNpcId(String sessionId, String npcId);
+    Optional<SessionNpcEntity> findByChronicleIdAndNpcId(String chronicleId, String npcId);
 }

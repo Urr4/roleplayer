@@ -20,17 +20,17 @@ public class InMemorySessionNpcLinkRepository implements SessionNpcLinkRepositor
     private final Map<String, Set<String>> linksBySession = new ConcurrentHashMap<>();
 
     @Override
-    public void link(String sessionId, String npcId) {
-        linksBySession.computeIfAbsent(sessionId, s -> ConcurrentHashMap.newKeySet()).add(npcId);
+    public void link(String chronicleId, String npcId) {
+        linksBySession.computeIfAbsent(chronicleId, s -> ConcurrentHashMap.newKeySet()).add(npcId);
     }
 
     @Override
-    public void unlink(String sessionId, String npcId) {
-        linksBySession.getOrDefault(sessionId, Set.of()).remove(npcId);
+    public void unlink(String chronicleId, String npcId) {
+        linksBySession.getOrDefault(chronicleId, Set.of()).remove(npcId);
     }
 
     @Override
-    public List<String> findNpcIdsBySession(String sessionId) {
-        return List.copyOf(linksBySession.getOrDefault(sessionId, Set.of()));
+    public List<String> findNpcIdsByChronicle(String chronicleId) {
+        return List.copyOf(linksBySession.getOrDefault(chronicleId, Set.of()));
     }
 }

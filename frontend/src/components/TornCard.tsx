@@ -12,12 +12,11 @@ interface TornCardProps extends PaperProps {
 export default function TornCard({ rotate = 0, sx, children, ...rest }: TornCardProps) {
   return (
     <Paper
-      elevation={3}
+      elevation={0}
       className="torn-edge"
       sx={{
         p: 2,
-        transform: `rotate(${rotate}deg)`,
-        bgcolor: '#f3e6c4',
+        transform: rotate ? `rotate(${rotate}deg)` : 'none',
         ...sx,
       }}
       {...rest}

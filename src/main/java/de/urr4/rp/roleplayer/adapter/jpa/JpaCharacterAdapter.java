@@ -11,40 +11,14 @@ import java.util.Optional;
 @Component
 @Profile("!local")
 public class JpaCharacterAdapter implements CharacterRepository {
-
     private final SpringDataCharacterRepository repository;
-
-    public JpaCharacterAdapter(SpringDataCharacterRepository repository) {
-        this.repository = repository;
-    }
-
-    @Override
-    public Character save(Character character) {
-        CharacterEntity saved = repository.save(new CharacterEntity(character.id(), character.name(),
-                character.playerId(), character.pdfObjectKey(), character.createdAt()));
+    public JpaCharacterAdapter(SpringDataCharacterRepository repository) { this.repository = repository; }
+    @Override public Character save(Character character) {
+        CharacterEntity saved = repository.save(new CharacterEntity(character.id(), character.chronicleId(), character.name(), character.playerId(), character.pdfObjectKey(), character.createdAt()));
         return toDomain(saved);
     }
-
-    @Override
-    public List<Character> findAll() {
-        return repository.findAll().stream().map(JpaCharacterAdapter::toDomain).toList();
-    }
-
-    @Override
-    public List<Character> findByIds(List<String> ids) {
-        if (ids.isEmpty()) {
-            return List.of();
-        }
-        return repository.findByIdIn(ids).stream().map(JpaCharacterAdapter::toDomain).toList();
-    }
-
-    @Override
-    public Optional<Character> findById(String id) {
-        return repository.findById(id).map(JpaCharacterAdapter::toDomain);
-    }
-
-    private static Character toDomain(CharacterEntity entity) {
-        return new Character(entity.getId(), entity.getName(), entity.getPlayerId(), entity.getPdfObjectKey(),
-                entity.getCreatedAt());
-    }
+    @Override public List<Character> findAll() { return repository.findAll().stream().map(JpaCharacterAdapter::toDomain).toList(); }
+    @Override public List<Character> findByChronicleId(String chronicleId) { return repository.findByChronicleId(chronicleId).stream().map(JpaCharacterAdapter::toDomain).toList(); }
+    @Override public Optional<Character> findById(String id) { return repository.findById(id).map(JpaCharacterAdapter::toDomain); }
+    private static Character toDomain(CharacterEntity entity) { return new Character(entity.getId(), entity.getChronicleId(), entity.getName(), entity.getPlayerId(), entity.getPdfObjectKey(), entity.getCreatedAt()); }
 }

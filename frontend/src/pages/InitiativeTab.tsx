@@ -19,11 +19,11 @@ import { CSS } from '@dnd-kit/utilities';
 import { Box, Checkbox, Paper, Stack, Typography } from '@mui/material';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import Cookies from 'js-cookie';
-import type { CharacterDto, SessionDto } from '../types';
-import { getSessionCharacters } from '../api/client';
+import type { CharacterDto, ChronicleDto } from '../types';
+import { getChronicleCharacters } from '../api/client';
 
 interface Props {
-  session: SessionDto;
+  chronicle: ChronicleDto;
 }
 
 interface TrackerRow {
@@ -31,10 +31,10 @@ interface TrackerRow {
   active: boolean;
 }
 
-const cookieKey = (sessionId: string) => `roleplayer.initiative.${sessionId}`;
+const cookieKey = (chronicleId: string) => `roleplayer.initiative.${chronicleId}`;
 
-function loadOrder(sessionId: string): TrackerRow[] {
-  const raw = Cookies.get(cookieKey(sessionId));
+function loadOrder(chronicleId: string): TrackerRow[] {
+  const raw = Cookies.get(cookieKey(chronicleId));
   if (!raw) return [];
   try {
     return JSON.parse(raw) as TrackerRow[];
@@ -43,8 +43,8 @@ function loadOrder(sessionId: string): TrackerRow[] {
   }
 }
 
-function saveOrder(sessionId: string, rows: TrackerRow[]) {
-  Cookies.set(cookieKey(sessionId), JSON.stringify(rows), { expires: 30 });
+function saveOrder(chronicleId: string, rows: TrackerRow[]) {
+  Cookies.set(cookieKey(chronicleId), JSON.stringify(rows), { expires: 30 });
 }
 
 function SortableRow({ character, active, onToggle }: { character: CharacterDto; active: boolean; onToggle: () => void }) {
@@ -61,14 +61,13 @@ function SortableRow({ character, active, onToggle }: { character: CharacterDto;
         gap: 1.5,
         p: 1.25,
         mb: 1,
-        opacity: active ? 1 : 0.4,
-        filter: active ? 'none' : 'grayscale(1)',
-        bgcolor: active ? '#f3e6c4' : '#d8cba8',
-        border: '2px solid #5b3a24',
-        borderRadius: 1,
+        opacity: active ? 1 : 0.65,
+        bgcolor: active ? 'background.paper' : 'rgba(15, 23, 42, 0.6)',
+        border: theme => `1px solid ${active ? theme.palette.primary.main : 'rgba(148, 163, 184, 0.16)'}`,
+        borderRadius: 2,
       }}
     >
-      <Box {...attributes} {...listeners} sx={{ cursor: 'grab', display: 'flex', color: '#5b3a24' }}>
+      <Box {...attributes} {...listeners} sx={{ cursor: 'grab', display: 'flex', color: 'text.secondary' }}>
         <DragIndicatorIcon />
       </Box>
       <Checkbox checked={active} onChange={onToggle} />
@@ -79,7 +78,7 @@ function SortableRow({ character, active, onToggle }: { character: CharacterDto;
   );
 }
 
-export default function InitiativeTab({ session }: Props) {
+export default function InitiativeTab({ chronicle }: Props) {
   const [characters, setCharacters] = useState<CharacterDto[]>([]);
   const [rows, setRows] = useState<TrackerRow[]>([]);
 
@@ -89,39 +88,37 @@ export default function InitiativeTab({ session }: Props) {
   );
 
   useEffect(() => {
-    getSessionCharacters(session.id).then(chars => {
+    getChronicleCharacters(chronicle.id).then(chars => {
       setCharacters(chars);
-      const stored = loadOrder(session.id);
-      const storedIds = new Set(stored.map(r => r.characterId));
-      // Keep the stored order/checked-state for characters still in the session,
-      // and append any newly-linked characters at the bottom (checked by default).
+      const stored = loadOrder(chronicle.id);
+      const storedIds = new Set(stored.map(row => row.characterId));
       const merged: TrackerRow[] = [
-        ...stored.filter(r => chars.some(c => c.id === r.characterId)),
-        ...chars.filter(c => !storedIds.has(c.id)).map(c => ({ characterId: c.id, active: true })),
+        ...stored.filter(row => chars.some(character => character.id === row.characterId)),
+        ...chars.filter(character => !storedIds.has(character.id)).map(character => ({ characterId: character.id, active: true })),
       ];
       setRows(merged);
-      saveOrder(session.id, merged);
+      saveOrder(chronicle.id, merged);
     });
-  }, [session.id]);
+  }, [chronicle.id]);
 
-  const charactersById = Object.fromEntries(characters.map(c => [c.id, c]));
+  const charactersById = Object.fromEntries(characters.map(character => [character.id, character]));
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    setRows(prev => {
-      const oldIndex = prev.findIndex(r => r.characterId === active.id);
-      const newIndex = prev.findIndex(r => r.characterId === over.id);
-      const next = arrayMove(prev, oldIndex, newIndex);
-      saveOrder(session.id, next);
+    setRows(previous => {
+      const oldIndex = previous.findIndex(row => row.characterId === active.id);
+      const newIndex = previous.findIndex(row => row.characterId === over.id);
+      const next = arrayMove(previous, oldIndex, newIndex);
+      saveOrder(chronicle.id, next);
       return next;
     });
   };
 
   const toggleActive = (characterId: string) => {
-    setRows(prev => {
-      const next = prev.map(r => (r.characterId === characterId ? { ...r, active: !r.active } : r));
-      saveOrder(session.id, next);
+    setRows(previous => {
+      const next = previous.map(row => (row.characterId === characterId ? { ...row, active: !row.active } : row));
+      saveOrder(chronicle.id, next);
       return next;
     });
   };
@@ -132,18 +129,17 @@ export default function InitiativeTab({ session }: Props) {
         ⚔️ The Battle Board
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2, fontStyle: 'italic' }}>
-        Drag the rope handles to reorder initiative. Untick a nameplate when its bearer is out of the fight —
-        this order is only kept on this browser, never saved to the vault.
+        Drag to reorder initiative. Untick a nameplate when its bearer is out of the fight — this order is only kept on this browser.
       </Typography>
 
       {rows.length === 0 && (
         <Typography color="text.secondary" sx={{ fontStyle: 'italic' }}>
-          No characters linked to this session yet — add some in the Session tab.
+          No characters linked to this chronicle yet — add some in the Chronicles tab.
         </Typography>
       )}
 
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={rows.map(r => r.characterId)} strategy={verticalListSortingStrategy}>
+        <SortableContext items={rows.map(row => row.characterId)} strategy={verticalListSortingStrategy}>
           <Stack>
             {rows.map(row => {
               const character = charactersById[row.characterId];

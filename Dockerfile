@@ -33,6 +33,13 @@ FROM eclipse-temurin:21-jre-jammy
 
 RUN groupadd -r roleplayer && useradd -r -g roleplayer roleplayer
 
+# libopus0 provides the native Opus codec JDA's voice support (club.minnced:opus-java)
+# falls back to via JNA on architectures (like this image's arm64/Raspberry Pi target)
+# for which opus-java ships no bundled native binary — see docs/discord-bot-setup.md.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libopus0 && \
+    rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY --from=backend-build /app/build/libs/*-SNAPSHOT.jar app.jar
 RUN mkdir -p /data && chown -R roleplayer:roleplayer /app /data

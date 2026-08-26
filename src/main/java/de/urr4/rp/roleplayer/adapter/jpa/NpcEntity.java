@@ -25,21 +25,21 @@ public class NpcEntity {
 
     private String mood;
 
-    private String originSessionId;
+    private String originChronicleId;
 
     private Instant createdAt;
 
     protected NpcEntity() {
     }
 
-    public NpcEntity(String id, String name, String motive, NpcStatus status, String mood, String originSessionId,
+    public NpcEntity(String id, String name, String motive, NpcStatus status, String mood, String originChronicleId,
                       Instant createdAt) {
         this.id = id;
         this.name = name;
         this.motive = motive;
         this.status = status;
         this.mood = mood;
-        this.originSessionId = originSessionId;
+        this.originChronicleId = originChronicleId;
         this.createdAt = createdAt;
     }
 
@@ -63,8 +63,8 @@ public class NpcEntity {
         return mood;
     }
 
-    public String getOriginSessionId() {
-        return originSessionId;
+    public String getOriginChronicleId() {
+        return originChronicleId;
     }
 
     public Instant getCreatedAt() {

@@ -82,6 +82,13 @@ public class LiveRecordingBufferManager {
 
     public Recording start(String adventureId, RecordingSource source, String fileExtension, String contentType,
                            String language, boolean diarize, boolean storedAudioRequiresWavHeader) {
+        return start(adventureId, source, fileExtension, contentType, language, diarize, storedAudioRequiresWavHeader,
+                null, false);
+    }
+
+    public Recording start(String adventureId, RecordingSource source, String fileExtension, String contentType,
+                           String language, boolean diarize, boolean storedAudioRequiresWavHeader,
+                           String discordChannelId, boolean writeTranscriptToChat) {
         Adventure adventure = adventureRepository.findById(adventureId)
                 .orElseThrow(() -> new NoSuchElementException("Adventure not found: " + adventureId));
         chronicleRepository.findById(adventure.chronicleId())
@@ -97,7 +104,9 @@ public class LiveRecordingBufferManager {
                 contentType,
                 language,
                 diarize,
-                storedAudioRequiresWavHeader));
+                storedAudioRequiresWavHeader,
+                discordChannelId,
+                writeTranscriptToChat));
         return savedRecording;
     }
 
@@ -268,7 +277,8 @@ public class LiveRecordingBufferManager {
         if (buffer.storedAudioRequiresWavHeader()) {
             List<SpeakerAudioDelta> speakerDeltas = buffer.collectSpeakerDeltas(recording.id());
             recordingProcessingService.processDiscordLiveDelta(updatedRecording, chronicle.name(), speakerDeltas,
-                    approximateOffsetMs, flushedAt, buffer.language(), buffer, () -> {
+                    approximateOffsetMs, flushedAt, buffer.language(), buffer.discordChannelId(),
+                    buffer.writeTranscriptToChat(), buffer, () -> {
                         if (fullBufferBytes.length > buffer.lastTranscribedOffset()) {
                             buffer.advanceTranscriptionBoundary(fullBufferBytes.length, approximateDurationMs);
                         }
@@ -380,6 +390,8 @@ public class LiveRecordingBufferManager {
         private final String language;
         private final boolean diarize;
         private final boolean storedAudioRequiresWavHeader;
+        private final String discordChannelId;
+        private final boolean writeTranscriptToChat;
         private final Map<String, DiscordUserBuffer> discordUserBuffers = new HashMap<>();
         private Instant firstChunkAt;
         private Instant lastChunkAt;
@@ -391,13 +403,16 @@ public class LiveRecordingBufferManager {
         private boolean captureEnabled = true;
 
         private ManagedRecordingBuffer(Path audioBufferPath, String fileExtension, String contentType, String language,
-                                       boolean diarize, boolean storedAudioRequiresWavHeader) {
+                                       boolean diarize, boolean storedAudioRequiresWavHeader,
+                                       String discordChannelId, boolean writeTranscriptToChat) {
             this.audioBufferPath = audioBufferPath;
             this.fileExtension = fileExtension;
             this.contentType = contentType;
             this.language = language;
             this.diarize = diarize;
             this.storedAudioRequiresWavHeader = storedAudioRequiresWavHeader;
+            this.discordChannelId = discordChannelId;
+            this.writeTranscriptToChat = writeTranscriptToChat;
         }
 
         private Path audioBufferPath() {
@@ -422,6 +437,14 @@ public class LiveRecordingBufferManager {
 
         private boolean storedAudioRequiresWavHeader() {
             return storedAudioRequiresWavHeader;
+        }
+
+        private String discordChannelId() {
+            return discordChannelId;
+        }
+
+        private boolean writeTranscriptToChat() {
+            return writeTranscriptToChat;
         }
 
         private long lastTranscribedOffset() {

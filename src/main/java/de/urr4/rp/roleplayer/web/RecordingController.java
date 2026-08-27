@@ -55,8 +55,10 @@ public class RecordingController {
         try {
             RecordingSource source = parseStartSource(request);
             String discordChannelId = parseDiscordChannelId(source, request);
+            boolean writeTranscriptToChat = request != null && request.resolvedWriteTranscriptToChat();
             return ResponseEntity.accepted()
-                    .body(RecordingDto.from(recordingService.startLiveRecording(adventureId, source, discordChannelId)));
+                    .body(RecordingDto.from(recordingService.startLiveRecording(adventureId, source, discordChannelId,
+                            writeTranscriptToChat)));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
         } catch (IllegalStateException e) {

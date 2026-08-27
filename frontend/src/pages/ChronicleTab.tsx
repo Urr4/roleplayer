@@ -11,6 +11,7 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControlLabel,
   Grid,
   IconButton,
   List,
@@ -18,6 +19,7 @@ import {
   ListItemButton,
   ListItemText,
   Stack,
+  Switch,
   TextField,
   Tooltip,
   Typography,
@@ -36,7 +38,7 @@ import StopIcon from '@mui/icons-material/Stop';
 import StopCircleIcon from '@mui/icons-material/StopCircle';
 import ExploreIcon from '@mui/icons-material/Explore';
 import TranscriptPanel from './TranscriptPanel';
-import type { AdventureCharacterDto, AdventureDto, CharacterDto, ChronicleDto, PlayerDto, RecordingDto } from '../types';
+import type { AdventureCharacterDto, AdventureDto, CharacterDto, ChronicleDto, DiscordGuildDto, DiscordVoiceChannelDto, PlayerDto, RecordingDto } from '../types';
 import {
   addAdventureCharacter,
   appendRecordingChunk,
@@ -48,6 +50,8 @@ import {
   getAllCharacters,
   getCharacterSheetUrl,
   getChronicleCharacters,
+  getDiscordGuilds,
+  getDiscordVoiceChannels,
   getPlayers,
   getRecordings,
   importCharacterIntoChronicle,
@@ -101,7 +105,14 @@ export default function ChronicleTab({
   const [recordDialogOpen, setRecordDialogOpen] = useState(false);
   const [recordDialogAdventureId, setRecordDialogAdventureId] = useState<string | null>(null);
   const [recordPromptAdventureId, setRecordPromptAdventureId] = useState<string | null>(null);
-  const [discordChannelId, setDiscordChannelId] = useState('');
+  const [discordGuilds, setDiscordGuilds] = useState<DiscordGuildDto[]>([]);
+  const [discordGuildsLoading, setDiscordGuildsLoading] = useState(false);
+  const [selectedDiscordGuild, setSelectedDiscordGuild] = useState<DiscordGuildDto | null>(null);
+  const [discordChannels, setDiscordChannels] = useState<DiscordVoiceChannelDto[]>([]);
+  const [discordChannelsLoading, setDiscordChannelsLoading] = useState(false);
+  const [selectedDiscordChannel, setSelectedDiscordChannel] = useState<DiscordVoiceChannelDto | null>(null);
+  const [writeTranscriptToChat, setWriteTranscriptToChat] = useState(false);
+  const [discordConfirmOpen, setDiscordConfirmOpen] = useState(false);
   const [liveRecording, setLiveRecording] = useState<RecordingDto | null>(null);
   const [liveRecordingAdventureId, setLiveRecordingAdventureId] = useState<string | null>(null);
   const [recordingBusy, setRecordingBusy] = useState(false);
@@ -437,7 +448,6 @@ export default function ChronicleTab({
       setLiveRecordingAdventureId(adventureId);
       setRecordDialogOpen(false);
       setRecordDialogAdventureId(null);
-      setDiscordChannelId('');
     } catch (err) {
       try {
         stream?.getTracks().forEach(track => track.stop());
@@ -454,23 +464,29 @@ export default function ChronicleTab({
     }
   };
 
+  const handleRequestStartDiscord = () => {
+    if (!selectedDiscordGuild || !selectedDiscordChannel) return;
+    setDiscordConfirmOpen(true);
+  };
+
   const handleStartDiscord = async () => {
     const adventureId = recordDialogAdventureId;
-    if (!adventureId || !discordChannelId.trim() || recordingBusy) return;
+    if (!adventureId || !selectedDiscordChannel || recordingBusy) return;
     const blockMessage = getRecordingBlockMessage(adventureId);
     if (blockMessage) {
       setError(blockMessage);
+      setDiscordConfirmOpen(false);
       return;
     }
 
     setRecordingBusy(true);
     try {
-      const recording = await startRecording(adventureId, 'DISCORD', discordChannelId.trim());
+      const recording = await startRecording(adventureId, 'DISCORD', selectedDiscordChannel.id, writeTranscriptToChat);
       setLiveRecording(recording);
       setLiveRecordingAdventureId(adventureId);
       setRecordDialogOpen(false);
       setRecordDialogAdventureId(null);
-      setDiscordChannelId('');
+      resetDiscordPicker();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to start Discord recording.');
     } finally {
@@ -530,9 +546,36 @@ export default function ChronicleTab({
     }
   };
 
+  const resetDiscordPicker = useCallback(() => {
+    setDiscordGuilds([]);
+    setSelectedDiscordGuild(null);
+    setDiscordChannels([]);
+    setSelectedDiscordChannel(null);
+    setWriteTranscriptToChat(false);
+    setDiscordConfirmOpen(false);
+  }, []);
+
   const openRecordDialog = (adventureId: string) => {
     setRecordDialogAdventureId(adventureId);
     setRecordDialogOpen(true);
+    resetDiscordPicker();
+    setDiscordGuildsLoading(true);
+    getDiscordGuilds()
+      .then(guilds => setDiscordGuilds(guilds))
+      .catch(err => setError(err instanceof Error ? err.message : 'Unable to load Discord servers.'))
+      .finally(() => setDiscordGuildsLoading(false));
+  };
+
+  const handleSelectDiscordGuild = (guild: DiscordGuildDto | null) => {
+    setSelectedDiscordGuild(guild);
+    setDiscordChannels([]);
+    setSelectedDiscordChannel(null);
+    if (!guild) return;
+    setDiscordChannelsLoading(true);
+    getDiscordVoiceChannels(guild.id)
+      .then(channels => setDiscordChannels(channels))
+      .catch(err => setError(err instanceof Error ? err.message : 'Unable to load Discord voice channels.'))
+      .finally(() => setDiscordChannelsLoading(false));
   };
 
   return (
@@ -973,6 +1016,7 @@ export default function ChronicleTab({
         onClose={() => {
           setRecordDialogOpen(false);
           setRecordDialogAdventureId(null);
+          resetDiscordPicker();
         }}
         maxWidth="xs"
         fullWidth
@@ -983,6 +1027,7 @@ export default function ChronicleTab({
             onClick={() => {
               setRecordDialogOpen(false);
               setRecordDialogAdventureId(null);
+              resetDiscordPicker();
             }}
           >
             <CloseIcon />
@@ -1011,23 +1056,59 @@ export default function ChronicleTab({
             >
               Microphone
             </Button>
-            <Stack direction="row" spacing={1}>
-              <TextField
-                label="Discord voice channel ID"
-                size="small"
-                fullWidth
-                value={discordChannelId}
-                onChange={event => setDiscordChannelId(event.target.value)}
-              />
-              <Button
-                variant="outlined"
-                startIcon={<DiscordIcon />}
-                disabled={recordingBusy || !discordChannelId.trim()}
-                onClick={() => void handleStartDiscord()}
-              >
-                Discord
-              </Button>
-            </Stack>
+            <Divider>Discord</Divider>
+            <Autocomplete
+              options={discordGuilds}
+              getOptionLabel={guild => guild.name}
+              value={selectedDiscordGuild}
+              loading={discordGuildsLoading}
+              onChange={(_, guild) => handleSelectDiscordGuild(guild)}
+              renderInput={params => <TextField {...params} label="Server" size="small" />}
+              noOptionsText={discordGuildsLoading ? 'Loading…' : 'No Discord servers found'}
+            />
+            <Autocomplete
+              options={discordChannels}
+              getOptionLabel={channel => `${channel.name} (${channel.participantCount})`}
+              value={selectedDiscordChannel}
+              loading={discordChannelsLoading}
+              disabled={!selectedDiscordGuild}
+              onChange={(_, channel) => setSelectedDiscordChannel(channel)}
+              renderInput={params => <TextField {...params} label="Voice channel" size="small" />}
+              noOptionsText={discordChannelsLoading ? 'Loading…' : 'No occupied voice channels'}
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={writeTranscriptToChat}
+                  onChange={event => setWriteTranscriptToChat(event.target.checked)}
+                />
+              }
+              label="Write transcript to chat?"
+            />
+            <Button
+              variant="outlined"
+              startIcon={<DiscordIcon />}
+              fullWidth
+              disabled={recordingBusy || !selectedDiscordGuild || !selectedDiscordChannel}
+              onClick={handleRequestStartDiscord}
+            >
+              Discord
+            </Button>
+          </Stack>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={discordConfirmOpen} onClose={() => setDiscordConfirmOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Start recording?</DialogTitle>
+        <DialogContent>
+          <Typography sx={{ mb: 2 }}>
+            Start recording in {selectedDiscordGuild?.name}/{selectedDiscordChannel?.name}?
+          </Typography>
+          <Stack direction="row" spacing={1} justifyContent="flex-end">
+            <Button onClick={() => setDiscordConfirmOpen(false)}>Cancel</Button>
+            <Button variant="contained" disabled={recordingBusy} onClick={() => void handleStartDiscord()}>
+              Yes
+            </Button>
           </Stack>
         </DialogContent>
       </Dialog>

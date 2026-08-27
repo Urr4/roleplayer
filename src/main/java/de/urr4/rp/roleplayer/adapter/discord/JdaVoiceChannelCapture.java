@@ -11,6 +11,8 @@ import net.dv8tion.jda.api.managers.AudioManager;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Component;
 
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -79,6 +81,35 @@ public class JdaVoiceChannelCapture implements VoiceChannelCapture {
         if (capture != null) {
             capture.close();
         }
+    }
+
+    @Override
+    public List<DiscordGuild> listGuilds() {
+        return jda.getGuilds().stream()
+                .map(guild -> new DiscordGuild(guild.getId(), guild.getName()))
+                .toList();
+    }
+
+    @Override
+    public List<DiscordVoiceChannel> listVoiceChannelsWithParticipants(String guildId) {
+        Guild guild = jda.getGuildById(guildId);
+        if (guild == null) {
+            throw new NoSuchElementException("Discord guild not found: " + guildId);
+        }
+        return guild.getVoiceChannels().stream()
+                .map(channel -> new DiscordVoiceChannel(channel.getId(), channel.getName(), channel.getMembers().size()))
+                .filter(channel -> channel.participantCount() >= 1)
+                .sorted(Comparator.comparing(DiscordVoiceChannel::name))
+                .toList();
+    }
+
+    @Override
+    public void sendChatMessage(String channelId, String text) {
+        VoiceChannel channel = jda.getChannelById(VoiceChannel.class, channelId);
+        if (channel == null) {
+            throw new NoSuchElementException("Discord voice channel not found: " + channelId);
+        }
+        channel.sendMessage(text).queue();
     }
 
     private record ActiveCapture(Guild guild, AudioManager audioManager, AudioReceiveHandler handler) {

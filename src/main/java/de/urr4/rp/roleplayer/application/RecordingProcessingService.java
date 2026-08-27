@@ -10,20 +10,26 @@ import de.urr4.rp.roleplayer.domain.port.out.RecordingRepository;
 import de.urr4.rp.roleplayer.domain.port.out.TranscriptSegmentRepository;
 import de.urr4.rp.roleplayer.domain.port.out.TranscriptStore;
 import de.urr4.rp.roleplayer.domain.port.out.TranscriptionClient;
+import de.urr4.rp.roleplayer.domain.port.out.VoiceChannelCapture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 @Service
 class RecordingProcessingService {
 
     private static final Logger log = LoggerFactory.getLogger(RecordingProcessingService.class);
+    private static final DateTimeFormatter CHAT_TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss")
+            .withZone(ZoneId.systemDefault());
 
     private final AudioStore audioStore;
     private final TranscriptStore transcriptStore;
@@ -32,12 +38,14 @@ class RecordingProcessingService {
     private final RecordingRepository recordingRepository;
     private final ObjectMapper objectMapper;
     private final TranscriptEventPublisher transcriptEventPublisher;
+    private final Optional<VoiceChannelCapture> voiceChannelCapture;
 
     RecordingProcessingService(AudioStore audioStore, TranscriptStore transcriptStore,
                                TranscriptionClient transcriptionClient,
                                TranscriptSegmentRepository transcriptSegmentRepository,
                                RecordingRepository recordingRepository, ObjectMapper objectMapper,
-                               TranscriptEventPublisher transcriptEventPublisher) {
+                               TranscriptEventPublisher transcriptEventPublisher,
+                               Optional<VoiceChannelCapture> voiceChannelCapture) {
         this.audioStore = audioStore;
         this.transcriptStore = transcriptStore;
         this.transcriptionClient = transcriptionClient;
@@ -45,6 +53,7 @@ class RecordingProcessingService {
         this.recordingRepository = recordingRepository;
         this.objectMapper = objectMapper;
         this.transcriptEventPublisher = transcriptEventPublisher;
+        this.voiceChannelCapture = voiceChannelCapture;
     }
 
     @Async("recordingTaskExecutor")
@@ -102,7 +111,8 @@ class RecordingProcessingService {
 
     @Async("recordingTaskExecutor")
     public void processDiscordLiveDelta(Recording recording, String sessionName, List<SpeakerAudioDelta> speakerDeltas,
-                                        long offsetMs, Instant flushedAt, String language, Object recordingLock,
+                                        long offsetMs, Instant flushedAt, String language, String discordChannelId,
+                                        boolean writeTranscriptToChat, Object recordingLock,
                                         Runnable onDeltaPersisted) {
         try {
             List<TranscriptSegment> segmentsToPersist = new ArrayList<>();
@@ -121,7 +131,12 @@ class RecordingProcessingService {
 
             segmentsToPersist.stream()
                     .map(transcriptSegmentRepository::save)
-                    .forEach(segment -> transcriptEventPublisher.publish(recording.adventureId(), segment));
+                    .forEach(segment -> {
+                        transcriptEventPublisher.publish(recording.adventureId(), segment);
+                        if (writeTranscriptToChat && discordChannelId != null && !discordChannelId.isBlank()) {
+                            sendTranscriptSegmentToChat(discordChannelId, segment);
+                        }
+                    });
 
             synchronized (recordingLock) {
                 if (!speakerDeltas.isEmpty()) {
@@ -134,6 +149,17 @@ class RecordingProcessingService {
                     recording.id(), e);
             throw new IllegalStateException("Failed to process Discord live recording delta " + recording.id(), e);
         }
+    }
+
+    private void sendTranscriptSegmentToChat(String discordChannelId, TranscriptSegment segment) {
+        voiceChannelCapture.ifPresent(capture -> {
+            try {
+                String timestamp = CHAT_TIMESTAMP_FORMAT.format(segment.createdAt());
+                capture.sendChatMessage(discordChannelId, segment.speakerLabel() + ": " + segment.text() + " (" + timestamp + ")");
+            } catch (RuntimeException e) {
+                log.warn("Failed to write transcript segment to Discord chat {}", discordChannelId, e);
+            }
+        });
     }
 
     private static String normalizedContentType(String contentType) {

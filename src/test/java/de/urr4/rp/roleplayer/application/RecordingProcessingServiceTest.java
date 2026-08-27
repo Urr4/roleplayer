@@ -10,6 +10,7 @@ import de.urr4.rp.roleplayer.domain.port.out.RecordingRepository;
 import de.urr4.rp.roleplayer.domain.port.out.TranscriptSegmentRepository;
 import de.urr4.rp.roleplayer.domain.port.out.TranscriptStore;
 import de.urr4.rp.roleplayer.domain.port.out.TranscriptionClient;
+import de.urr4.rp.roleplayer.domain.port.out.VoiceChannelCapture;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -46,7 +47,7 @@ class RecordingProcessingServiceTest {
 
         RecordingProcessingService service = new RecordingProcessingService(audioStore, transcriptStore,
                 transcriptionClient, transcriptSegmentRepository, recordingRepository, new ObjectMapper(),
-                transcriptEventPublisher);
+                transcriptEventPublisher, Optional.empty());
         Recording recording = new Recording("recording-1", "session-1", "adventure-1", RecordingSource.MICROPHONE,
                 RecordingStatus.RECORDING, Instant.parse("2026-08-25T10:00:00Z"), null, "audio-old", null);
 
@@ -124,7 +125,7 @@ class RecordingProcessingServiceTest {
 
         RecordingProcessingService service = new RecordingProcessingService(audioStore, transcriptStore,
                 transcriptionClient, transcriptSegmentRepository, recordingRepository, new ObjectMapper(),
-                transcriptEventPublisher);
+                transcriptEventPublisher, Optional.empty());
         Recording recording = currentRecording.get();
         Object recordingLock = new Object();
         CountDownLatch startGate = new CountDownLatch(1);

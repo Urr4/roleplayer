@@ -17,7 +17,7 @@ public class DiscordBotConfig {
     @Bean(destroyMethod = "shutdown")
     public JDA discordJda(@Value("${discord.bot-token}") String botToken) {
         return JDABuilder.createDefault(botToken)
-                .enableIntents(GatewayIntent.GUILD_VOICE_STATES)
+                .enableIntents(GatewayIntent.GUILD_VOICE_STATES, GatewayIntent.GUILD_MESSAGES)
                 .build();
     }
 }

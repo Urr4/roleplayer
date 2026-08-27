@@ -78,3 +78,15 @@ export interface TranscriptSegmentDto {
   text: string;
   createdAt: string;
 }
+
+// ── Discord bot ───────────────────────────────────────────────────────────────
+export interface DiscordGuildDto {
+  id: string;
+  name: string;
+}
+
+export interface DiscordVoiceChannelDto {
+  id: string;
+  name: string;
+  participantCount: number;
+}

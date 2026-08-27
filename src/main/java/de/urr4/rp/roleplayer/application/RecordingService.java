@@ -77,7 +77,8 @@ public class RecordingService {
         return savedRecording;
     }
 
-    public Recording startLiveRecording(String adventureId, RecordingSource source, String discordChannelId) {
+    public Recording startLiveRecording(String adventureId, RecordingSource source, String discordChannelId,
+                                        boolean writeTranscriptToChat) {
         if (source == RecordingSource.MICROPHONE) {
             return liveRecordingBufferManager.start(adventureId, source, MICROPHONE_RECORDING_EXTENSION,
                     MICROPHONE_RECORDING_CONTENT_TYPE, TRANSCRIPTION_LANGUAGE, true, false);
@@ -91,16 +92,33 @@ public class RecordingService {
 
         VoiceChannelCapture capture = voiceChannelCapture
                 .orElseThrow(() -> new IllegalStateException("Discord bot is not configured"));
+        String trimmedChannelId = discordChannelId.trim();
         Recording recording = liveRecordingBufferManager.start(adventureId, source, DISCORD_RECORDING_EXTENSION,
-                DISCORD_RECORDING_CONTENT_TYPE, TRANSCRIPTION_LANGUAGE, false, true);
+                DISCORD_RECORDING_CONTENT_TYPE, TRANSCRIPTION_LANGUAGE, false, true, trimmedChannelId,
+                writeTranscriptToChat);
         try {
-            capture.joinAndCapture(recording.id(), discordChannelId.trim(),
+            capture.joinAndCapture(recording.id(), trimmedChannelId,
                     liveRecordingBufferManager.createDiscordAudioSink(recording.id()));
+            try {
+                capture.sendChatMessage(trimmedChannelId, "Ich beginne mit der Aufzeichnung!");
+            } catch (RuntimeException e) {
+                // Best-effort: failing to announce shouldn't abort an otherwise-working recording.
+            }
             return recording;
         } catch (RuntimeException e) {
             liveRecordingBufferManager.fail(recording.id());
             throw e;
         }
+    }
+
+    public List<VoiceChannelCapture.DiscordGuild> listDiscordGuilds() {
+        return voiceChannelCapture.map(VoiceChannelCapture::listGuilds).orElseGet(List::of);
+    }
+
+    public List<VoiceChannelCapture.DiscordVoiceChannel> listDiscordVoiceChannels(String guildId) {
+        return voiceChannelCapture
+                .orElseThrow(() -> new IllegalStateException("Discord bot is not configured"))
+                .listVoiceChannelsWithParticipants(guildId);
     }
 
     public void appendLiveChunk(String recordingId, byte[] chunkBytes) {

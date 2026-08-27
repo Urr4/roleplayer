@@ -5,6 +5,8 @@ import type {
   AttributePools,
   CharacterDto,
   ChronicleDto,
+  DiscordGuildDto,
+  DiscordVoiceChannelDto,
   NpcDto,
   PlayerDto,
   RecordingDto,
@@ -111,8 +113,19 @@ export const uploadRecording = (adventureId: string, file: File) => {
   return api.post<RecordingDto>(`/adventures/${adventureId}/recordings`, form).then(r => r.data);
 };
 
-export const startRecording = (adventureId: string, source: RecordingSource, discordChannelId?: string) =>
-  api.post<RecordingDto>(`/adventures/${adventureId}/recordings/start`, { source, discordChannelId }).then(r => r.data);
+export const startRecording = (
+  adventureId: string,
+  source: RecordingSource,
+  discordChannelId?: string,
+  writeTranscriptToChat?: boolean,
+) =>
+  api
+    .post<RecordingDto>(`/adventures/${adventureId}/recordings/start`, {
+      source,
+      discordChannelId,
+      writeTranscriptToChat,
+    })
+    .then(r => r.data);
 
 export const appendRecordingChunk = (adventureId: string, recordingId: string, chunk: Blob) =>
   api.post(`/adventures/${adventureId}/recordings/${recordingId}/chunk`, chunk, {
@@ -130,6 +143,12 @@ export const stopRecording = (adventureId: string, recordingId: string) =>
 
 export const getRecordingTranscript = (adventureId: string, recordingId: string) =>
   api.get<TranscriptSegmentDto[]>(`/adventures/${adventureId}/recordings/${recordingId}/transcript`).then(r => r.data);
+
+// ── Discord bot ───────────────────────────────────────────────────────────────
+export const getDiscordGuilds = () => api.get<DiscordGuildDto[]>('/discord/guilds').then(r => r.data);
+
+export const getDiscordVoiceChannels = (guildId: string) =>
+  api.get<DiscordVoiceChannelDto[]>(`/discord/guilds/${guildId}/voice-channels`).then(r => r.data);
 
 // ── Adventure transcript (aggregated across recordings, with live updates) ──
 export const getAdventureTranscript = (adventureId: string) =>

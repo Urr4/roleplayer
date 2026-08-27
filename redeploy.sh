@@ -7,6 +7,19 @@ STACK="roleplayer"
 IMAGE="roleplayer:latest"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# ── 0. Load Pi-local secrets/config ───────────────────────────────────────────
+# .env is gitignored and lives only on the Pi — it is never overwritten by a
+# git pull. Put host-specific values here (ASR_URL, DISCORD_BOT_TOKEN, MinIO
+# credentials, …). See .env.example for the list of supported variables.
+ENV_FILE="${SCRIPT_DIR}/.env"
+if [[ -f "${ENV_FILE}" ]]; then
+  echo "==> Loading ${ENV_FILE} …"
+  set -a
+  # shellcheck disable=SC1090
+  source "${ENV_FILE}"
+  set +a
+fi
+
 # ── 1. Build image (ARM64 for Raspberry Pi) ───────────────────────────────────
 echo "==> Building ${IMAGE} …"
 docker build --platform linux/arm64 -t "${IMAGE}" "${SCRIPT_DIR}"
@@ -15,6 +28,8 @@ docker build --platform linux/arm64 -t "${IMAGE}" "${SCRIPT_DIR}"
 echo "==> Deploying stack '${STACK}' …"
 MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-roleplayer}" \
 MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-roleplayer123}" \
+ASR_URL="${ASR_URL:-http://Stefans-PC:9090}" \
+DISCORD_BOT_TOKEN="${DISCORD_BOT_TOKEN:-}" \
 docker stack deploy -c "${SCRIPT_DIR}/docker-compose.yml" "${STACK}"
 
 # ── 3. Force the app service onto the freshly built image ────────────────────

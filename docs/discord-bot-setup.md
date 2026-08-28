@@ -68,3 +68,34 @@ fallback doesn't pick up the system library, the last resort is compiling
 against `libopus-dev`, and point the JVM at the resulting `.so` via
 `-Djava.library.path`) — this is a known community workaround, not something
 this repo can verify in advance.
+
+## 6) Docker networking — host networking is required for voice
+
+Discord voice connections are negotiated over **UDP** with a port chosen
+dynamically per-session via IP discovery. When `roleplayer`'s `app` service
+ran on Docker Swarm's overlay network (with only the HTTP ports published in
+`mode: host`), that UDP traffic was still being NATed by the overlay network
+stack, which broke the voice handshake — the bot would join a voice channel
+and immediately get disconnected again (`ERROR_LOST_CONNECTION` /
+`ERROR_UDP_UNABLE_TO_CONNECT` in the logs), sometimes looping join/leave
+forever.
+
+`docker-compose.yml` now runs the `app` service with `network_mode: host`,
+so the container shares the Pi's network stack directly and Discord's UDP
+voice traffic is no longer NATed. This is why `MINIO_ENDPOINT` was changed
+from `http://minio:9000` (the overlay-network service name, no longer
+resolvable once `app` leaves the overlay network) to `http://localhost:9004`
+(MinIO's host-published port) — `app` and `minio` no longer share a Docker
+network, so they must talk to each other via the host's published ports.
+
+If you still see join/leave loops or `ERROR_LOST_CONNECTION` after
+redeploying with this change, check:
+- The Pi's firewall isn't blocking outbound/inbound UDP.
+- You actually redeployed the *new* stack config (`docker stack deploy`
+  again after pulling) — Swarm won't pick up compose file changes
+  automatically.
+- `docker service ps roleplayer_app` isn't stuck on an old task using the
+  previous network config (may need `docker stack rm roleplayer` and
+  redeploy from scratch if Swarm won't cleanly transition a running service
+  to `network_mode: host`).
+

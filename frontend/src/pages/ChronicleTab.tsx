@@ -924,6 +924,15 @@ export default function ChronicleTab({
                                     <Stack direction="row" spacing={0.75} alignItems="center">
                                       {adventure.status === 'ACTIVE' && <ExploreIcon fontSize="small" color="success" />}
                                       <Typography component="span">{adventure.name}</Typography>
+                                      {liveRecordingAdventureId === adventure.id && liveRecording?.status === 'RECORDING' && (
+                                        <Tooltip title="Recording in progress">
+                                          <FiberManualRecordIcon
+                                            fontSize="small"
+                                            sx={{ color: 'error.main', animation: 'pulse 1.5s ease-in-out infinite',
+                                              '@keyframes pulse': { '0%': { opacity: 1 }, '50%': { opacity: 0.3 }, '100%': { opacity: 1 } } }}
+                                          />
+                                        </Tooltip>
+                                      )}
                                     </Stack>
                                   }
                                   secondary={
@@ -1039,7 +1048,16 @@ export default function ChronicleTab({
                                   Recording & Transcript
                                 </Typography>
                                 {liveRecordingAdventureId === expandedAdventureId && liveRecording ? (
-                                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
+                                    <Chip
+                                      size="small"
+                                      icon={<FiberManualRecordIcon sx={liveRecording.status === 'RECORDING'
+                                        ? { color: 'error.main', animation: 'pulse 1.5s ease-in-out infinite', '@keyframes pulse': { '0%': { opacity: 1 }, '50%': { opacity: 0.3 }, '100%': { opacity: 1 } } }
+                                        : { color: 'text.disabled' }} />}
+                                      label={liveRecording.status === 'RECORDING' ? 'Recording…' : 'Paused'}
+                                      color={liveRecording.status === 'RECORDING' ? 'error' : 'default'}
+                                      variant={liveRecording.status === 'RECORDING' ? 'filled' : 'outlined'}
+                                    />
                                     <Button
                                       variant="outlined"
                                       startIcon={liveRecording.status === 'RECORDING' ? <PauseIcon /> : <PlayArrowIcon />}

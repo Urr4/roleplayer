@@ -67,6 +67,28 @@ echo "==> Building ${IMAGE} …"
 docker build --platform linux/arm64 -t "${IMAGE}" "${SCRIPT_DIR}"
 
 # ── 2. Deploy stack ───────────────────────────────────────────────────────────
+# Swarm cannot hot-swap a running service from an attached overlay network to
+# `network_mode: host` (or back) via `stack deploy`/`service update` — the
+# network attachments are fixed at service-creation time. If the previously
+# deployed roleplayer_app is still on the old "internal" overlay network (from
+# before this repo switched to host networking for reliable Discord voice
+# support), remove the whole stack first so it gets recreated cleanly with the
+# new network config.
+if docker service inspect "${STACK}_app" >/dev/null 2>&1; then
+  CURRENT_NETWORK_MODE="$(docker service inspect --format '{{if .Spec.TaskTemplate.Networks}}attached{{else}}host{{end}}' "${STACK}_app" 2>/dev/null || echo "unknown")"
+  if [[ "${CURRENT_NETWORK_MODE}" == "attached" ]]; then
+    echo "==> Existing ${STACK}_app service is on an overlay network but the compose file now uses"
+    echo "    network_mode: host — Swarm can't migrate this in place. Removing the stack so it can be"
+    echo "    recreated cleanly …"
+    docker stack rm "${STACK}"
+    echo "==> Waiting for the stack to fully tear down …"
+    for _ in $(seq 1 30); do
+      docker service inspect "${STACK}_app" >/dev/null 2>&1 || break
+      sleep 2
+    done
+  fi
+fi
+
 echo "==> Deploying stack '${STACK}' …"
 MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-roleplayer}" \
 MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-roleplayer123}" \

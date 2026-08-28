@@ -30,6 +30,30 @@ export default function TranscriptPanel({ adventureId, isLive }: Props) {
     });
   }, [adventureId]);
 
+  // Poll periodically even outside SSE-covered live recordings so that
+  // async processing (e.g. an uploaded file's transcription completing on
+  // the backend) is reflected here without requiring a manual refresh.
+  useEffect(() => {
+    if (isLive) return;
+    const interval = window.setInterval(() => {
+      getAdventureTranscript(adventureId).then(loaded => {
+        setSegments(previousSegments => {
+          const merged = new Map(previousSegments.map(segment => [segment.id, segment]));
+          let changed = loaded.length !== previousSegments.length;
+          loaded.forEach(segment => {
+            if (!merged.has(segment.id)) changed = true;
+            merged.set(segment.id, segment);
+          });
+          if (!changed) return previousSegments;
+          const mergedSegments = [...merged.values()].sort((a, b) => a.startMs - b.startMs);
+          seenIds.current = new Set(mergedSegments.map(segment => segment.id));
+          return mergedSegments;
+        });
+      });
+    }, 5000);
+    return () => window.clearInterval(interval);
+  }, [adventureId, isLive]);
+
   useEffect(() => {
     const previous = previousLiveStateRef.current;
     previousLiveStateRef.current = { adventureId, isLive };

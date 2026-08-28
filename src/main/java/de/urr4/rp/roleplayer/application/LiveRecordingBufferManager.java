@@ -11,6 +11,7 @@ import de.urr4.rp.roleplayer.domain.port.out.RecordingRepository;
 import de.urr4.rp.roleplayer.domain.port.out.AdventureRepository;
 import de.urr4.rp.roleplayer.domain.port.out.ChronicleRepository;
 import de.urr4.rp.roleplayer.domain.port.out.VoiceChannelCapture;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -214,6 +215,30 @@ public class LiveRecordingBufferManager {
     void cleanupBuffers() {
         buffers.values().forEach(this::deleteBufferArtifacts);
         buffers.clear();
+    }
+
+    /**
+     * The in-memory {@link #buffers} map does not survive an app restart. Any
+     * recording that was left in RECORDING/PAUSED status in the repository at
+     * the moment of a restart (e.g. crash, redeploy) would otherwise be stuck
+     * forever: {@link #requireTrackedBuffer} always throws for it since no
+     * buffer is tracked anymore, so pause/resume/stop would keep failing and
+     * the frontend's Pause/Complete buttons would appear to "do nothing".
+     * Reconcile such orphans to FAILED on startup so new recordings aren't
+     * blocked and the UI doesn't show permanently-stuck controls.
+     */
+    @PostConstruct
+    void reconcileOrphanedRecordingsOnStartup() {
+        List<Recording> orphaned = recordingRepository
+                .findByStatusIn(List.of(RecordingStatus.RECORDING, RecordingStatus.PAUSED));
+        for (Recording recording : orphaned) {
+            if (buffers.containsKey(recording.id())) {
+                continue;
+            }
+            log.warn("Marking orphaned recording {} (status {}) as FAILED after restart", recording.id(),
+                    recording.status());
+            saveRecording(recording, RecordingStatus.FAILED, Instant.now(clock));
+        }
     }
 
     private void appendDiscordCombinedAudio(String recordingId, byte[] pcmBytes) {

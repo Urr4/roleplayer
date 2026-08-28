@@ -8,6 +8,10 @@ import net.dv8tion.jda.api.audio.UserAudio;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.channel.concrete.VoiceChannel;
 import net.dv8tion.jda.api.managers.AudioManager;
+import net.dv8tion.jda.api.audio.hooks.ConnectionListener;
+import net.dv8tion.jda.api.audio.hooks.ConnectionStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Component;
 
@@ -20,6 +24,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 @ConditionalOnBean(JDA.class)
 public class JdaVoiceChannelCapture implements VoiceChannelCapture {
+
+    private static final Logger log = LoggerFactory.getLogger(JdaVoiceChannelCapture.class);
 
     private final JDA jda;
     private final Map<String, ActiveCapture> activeCaptures = new ConcurrentHashMap<>();
@@ -70,6 +76,36 @@ public class JdaVoiceChannelCapture implements VoiceChannelCapture {
         if (previousCapture != null) {
             previousCapture.close();
         }
+
+        // Disable JDA's default auto-reconnect: if the UDP voice handshake
+        // fails repeatedly (e.g. due to NAT/firewall issues on the host),
+        // auto-reconnect would keep silently rejoining/leaving in a loop
+        // instead of surfacing a clear failure. A ConnectionListener logs the
+        // status transitions so failures are visible instead of just
+        // appearing as an endless join/leave loop with no diagnostics.
+        audioManager.setAutoReconnect(false);
+        audioManager.setConnectionListener(new ConnectionListener() {
+            @Override
+            public void onPing(long ping) {
+                // no-op
+            }
+
+            @Override
+            public void onStatusChange(ConnectionStatus status) {
+                log.info("Discord voice connection status for recording {} in channel {}: {}", recordingId,
+                        discordChannelId, status);
+                boolean isTransientOrConnected = status == ConnectionStatus.CONNECTED
+                        || status == ConnectionStatus.NOT_CONNECTED
+                        || status.name().startsWith("CONNECTING_");
+                if (!isTransientOrConnected) {
+                    log.warn("Discord voice connection for recording {} in channel {} entered a disconnect/error"
+                                    + " state ({}); auto-reconnect is disabled, so the connection will not silently"
+                                    + " retry (join/leave loop). Investigate Discord bot permissions/network before"
+                                    + " restarting the recording.",
+                            recordingId, discordChannelId, status);
+                }
+            }
+        });
 
         audioManager.setReceivingHandler(handler);
         audioManager.openAudioConnection(channel);

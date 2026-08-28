@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import axios from 'axios';
 import {
   Alert,
   Autocomplete,
@@ -228,6 +229,22 @@ export default function ChronicleTab({
       cancelled = true;
     };
   }, [fetchRecordingState, expandedAdventureId]);
+
+  // Poll periodically so backend-side state changes (e.g. an upload finishing
+  // processing, a recording being reconciled to FAILED after a server
+  // restart, or a live recording flushed by the scheduler) are reflected in
+  // the UI even if the user doesn't take any action.
+  useEffect(() => {
+    if (!expandedAdventureId) return;
+    const interval = window.setInterval(() => {
+      void fetchRecordingState(expandedAdventureId).then(({ liveRecordingAdventureId: currentLiveRecordingAdventureId, liveRecording: currentLiveRecording }) => {
+        setLiveRecordingAdventureId(currentLiveRecordingAdventureId);
+        setLiveRecording(currentLiveRecording);
+      });
+    }, 5000);
+    return () => window.clearInterval(interval);
+  }, [expandedAdventureId, fetchRecordingState]);
+
 
   useEffect(
     () => () => {
@@ -508,7 +525,17 @@ export default function ChronicleTab({
         setLiveRecording(updated);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to update the recording state.');
+      if (axios.isAxiosError(err) && (err.response?.status === 409 || err.response?.status === 404)) {
+        // The recording is no longer tracked on the server (e.g. it was
+        // orphaned by a backend restart). Clear the stuck state locally so
+        // the user can start a new recording instead of the buttons being
+        // permanently unresponsive.
+        setLiveRecording(null);
+        setLiveRecordingAdventureId(null);
+        setError('This recording is no longer active on the server (it may have been interrupted by a restart). You can start a new recording.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Unable to update the recording state.');
+      }
     } finally {
       setRecordingBusy(false);
     }
@@ -539,7 +566,13 @@ export default function ChronicleTab({
       setLiveRecording(null);
       setLiveRecordingAdventureId(current => (current === adventureId ? null : current));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to stop the recording.');
+      if (axios.isAxiosError(err) && (err.response?.status === 409 || err.response?.status === 404)) {
+        setLiveRecording(null);
+        setLiveRecordingAdventureId(current => (current === adventureId ? null : current));
+        setError('This recording is no longer active on the server (it may have been interrupted by a restart).');
+      } else {
+        setError(err instanceof Error ? err.message : 'Unable to stop the recording.');
+      }
     } finally {
       releaseMicrophone();
       setRecordingBusy(false);
@@ -1035,6 +1068,11 @@ export default function ChronicleTab({
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ py: 1 }}>
+            {error && recordDialogOpen && (
+              <Alert severity="error" onClose={() => setError(null)}>
+                {error}
+              </Alert>
+            )}
             <Button component="label" variant="outlined" startIcon={<UploadFileIcon />} fullWidth>
               Upload file
               <input
@@ -1044,6 +1082,7 @@ export default function ChronicleTab({
                 onChange={event => {
                   const file = event.target.files?.[0];
                   if (file) void handleUploadRecording(file);
+                  event.target.value = '';
                 }}
               />
             </Button>

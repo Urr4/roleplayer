@@ -19,7 +19,12 @@ version: "3.9"
 #       docker build --platform linux/arm64 -t roleplayer:latest .
 #       docker stack deploy -c docker-compose.yml roleplayer
 #
-#  Erreichbar unter: http://pi1:3002
+#  Erreichbar unter: http://pi1:3002 (kein Mic/Kamera-Zugriff, kein secure context)
+#                 und https://pi1:8443 (self-signed Cert via Traefik, für
+#                 getUserMedia/Mikrofon nötig — einmalig Zertifikatswarnung
+#                 im Browser akzeptieren). Erfordert, dass Traefik bereits
+#                 über die taster-Stack läuft und das "web"-Netzwerk existiert:
+#                 docker network create --driver overlay --attachable web
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -41,6 +46,7 @@ services:
       - sqlite-data:/data
     networks:
       - internal
+      - web
     ports:
       - target: 3002
         published: 3002
@@ -63,6 +69,17 @@ services:
       placement:
         constraints:
           - node.role == manager
+      labels:
+        # Local-only HTTPS via the Traefik instance already running as part of
+        # the taster stack (shared "web" overlay network). No public domain/
+        # ACME cert here — just Traefik's self-signed default cert, enough to
+        # satisfy the browser's "secure context" requirement for getUserMedia
+        # (mic/camera). Browser will show a one-time cert warning to accept.
+        - traefik.enable=true
+        - traefik.http.routers.roleplayer.rule=Host(`pi1`)
+        - traefik.http.routers.roleplayer.entrypoints=websecure
+        - traefik.http.routers.roleplayer.tls=true
+        - traefik.http.services.roleplayer.loadbalancer.server.port=3002
 
   # ── MinIO (character sheet PDF storage) ─────────────────────────────────────
   minio:
@@ -97,6 +114,8 @@ networks:
   internal:
     driver: overlay
     attachable: true
+  web:
+    external: true   # pre-created by the taster stack: docker network create --driver overlay --attachable web
 
 volumes:
   sqlite-data:

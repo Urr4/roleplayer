@@ -38,7 +38,11 @@ dialog with three sources:
 - **Microphone** — records continuously from the browser; shows **Pause
   Recording**/**Continue Recording** and **Stop Recording** controls next to
   the session while active. Audio is flushed to MinIO every 5 minutes (and on
-  pause/stop), and transcribed incrementally as it comes in.
+  pause/stop), and transcribed incrementally as it comes in. Browsers only
+  expose the microphone API (`getUserMedia`) in a "secure context" — so open
+  the app via **`https://pi1:8443`** (routed through the local Traefik
+  instance with a self-signed cert; accept the one-time browser warning),
+  not plain `http://pi1:3002`.
 - **Discord** — give a voice channel ID; a Discord bot joins that channel and
   records it the same way, using real Discord usernames as speaker labels
   (no diarization needed, since Discord already separates audio per user).
@@ -58,6 +62,10 @@ for voice support).
 
 - A Raspberry Pi acting as a Docker Swarm manager (see `../taster` and
   `../mealplaner` for sibling projects using the same cluster).
+- The shared Traefik reverse proxy from `../taster` already deployed (it
+  provides the `web` overlay network and terminates HTTPS for every stack
+  attached to it — required for browser microphone access here; see
+  [Audio recording & transcription](#audio-recording--transcription)).
 - A Synology NAS reachable from the Pi with an NFS export configured (the
   same share already used by `mealplaner`/`taster`, typically
   `/volume1/cloudstorage`).

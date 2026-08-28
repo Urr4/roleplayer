@@ -67,19 +67,27 @@ echo "==> Building ${IMAGE} …"
 docker build --platform linux/arm64 -t "${IMAGE}" "${SCRIPT_DIR}"
 
 # ── 2. Deploy stack ───────────────────────────────────────────────────────────
-# Swarm cannot hot-swap a running service from an attached overlay network to
-# `network_mode: host` (or back) via `stack deploy`/`service update` — the
-# network attachments are fixed at service-creation time. If the previously
-# deployed roleplayer_app is still on the old "internal" overlay network (from
-# before this repo switched to host networking for reliable Discord voice
-# support), remove the whole stack first so it gets recreated cleanly with the
-# new network config.
+# Swarm cannot hot-swap a running service between networks via
+# `stack deploy`/`service update` — network attachments are fixed at
+# service-creation time. If the previously deployed roleplayer_app is not
+# already attached to the predefined "host" network (e.g. it's still on the
+# old "internal" overlay network, or on an auto-created "roleplayer_default"
+# overlay network from an earlier failed attempt at `network_mode: host` —
+# which Swarm silently ignores instead of honoring), remove the whole stack
+# first so it gets recreated cleanly with the current network config.
 if docker service inspect "${STACK}_app" >/dev/null 2>&1; then
-  CURRENT_NETWORK_MODE="$(docker service inspect --format '{{if .Spec.TaskTemplate.Networks}}attached{{else}}host{{end}}' "${STACK}_app" 2>/dev/null || echo "unknown")"
-  if [[ "${CURRENT_NETWORK_MODE}" == "attached" ]]; then
-    echo "==> Existing ${STACK}_app service is on an overlay network but the compose file now uses"
-    echo "    network_mode: host — Swarm can't migrate this in place. Removing the stack so it can be"
-    echo "    recreated cleanly …"
+  ATTACHED_NETWORK_IDS="$(docker service inspect --format '{{range .Spec.TaskTemplate.Networks}}{{.Target}} {{end}}' "${STACK}_app" 2>/dev/null || true)"
+  HOST_NETWORK_ID="$(docker network inspect --format '{{.Id}}' host 2>/dev/null || true)"
+  NEEDS_RECREATE=true
+  if [[ -n "${HOST_NETWORK_ID}" ]]; then
+    for network_id in ${ATTACHED_NETWORK_IDS}; do
+      [[ "${network_id}" == "${HOST_NETWORK_ID}" ]] && NEEDS_RECREATE=false
+    done
+  fi
+  if [[ "${NEEDS_RECREATE}" == "true" ]]; then
+    echo "==> Existing ${STACK}_app service is not attached to the predefined 'host' network but the"
+    echo "    compose file now requires it — Swarm can't migrate this in place. Removing the stack so"
+    echo "    it can be recreated cleanly …"
     docker stack rm "${STACK}"
     echo "==> Waiting for the stack's services to fully tear down …"
     for _ in $(seq 1 30); do
@@ -91,12 +99,15 @@ if docker service inspect "${STACK}_app" >/dev/null 2>&1; then
     # teardown finishes, it can see the network still present at the moment
     # it lists networks (skipping re-creation) but find it gone by the time
     # it actually creates a dependent service — surfacing as
-    # "network roleplayer_internal not found" while creating other services.
-    # Wait for the network to disappear too, not just the services.
-    echo "==> Waiting for the stack's overlay network to fully tear down …"
-    for _ in $(seq 1 30); do
-      docker network inspect "${STACK}_internal" >/dev/null 2>&1 || break
-      sleep 2
+    # "network roleplayer_internal not found" (or "roleplayer_default not
+    # found") while creating other services. Wait for the networks to
+    # disappear too, not just the services.
+    echo "==> Waiting for the stack's overlay networks to fully tear down …"
+    for network_name in "${STACK}_internal" "${STACK}_default"; do
+      for _ in $(seq 1 30); do
+        docker network inspect "${network_name}" >/dev/null 2>&1 || break
+        sleep 2
+      done
     done
   fi
 fi

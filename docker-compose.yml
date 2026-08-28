@@ -29,20 +29,23 @@ version: "3.9"
 services:
 
   # ── App (Spring Boot backend + embedded React frontend) ────────────────────
-  # NOTE: network_mode: host is required for reliable Discord voice support.
-  # JDA's voice connections use UDP with a dynamic port negotiated directly
-  # with Discord's voice servers (IP discovery). When the app runs on Docker
-  # Swarm's overlay network (the previous config — ports were only published
-  # in `mode: host`, but the container itself was still on the `internal`
-  # overlay network), that UDP traffic gets NATed/mangled by the overlay
-  # network and the voice handshake fails almost immediately after connecting
-  # — this is the root cause of the bot joining a channel and then instantly
-  # reporting ERROR_LOST_CONNECTION / leaving again. Host networking makes
-  # the container share the Pi's network stack directly, avoiding this NAT
-  # entirely. See docs/discord-bot-setup.md for details.
+  # NOTE: attached to the special "host" network (not network_mode: host,
+  # which `docker stack deploy` silently ignores in Swarm mode — see the
+  # `networks: [host]` / external network block below) for reliable Discord
+  # voice support. JDA's voice connections use UDP with a dynamic port
+  # negotiated directly with Discord's voice servers (IP discovery). When the
+  # app runs on Docker Swarm's overlay network (the original config — ports
+  # were only published in `mode: host`, but the container itself was still
+  # on the `internal` overlay network), that UDP traffic gets NATed/mangled
+  # by the overlay network and the voice handshake fails almost immediately
+  # after connecting — this is the root cause of the bot joining a channel and
+  # then instantly reporting ERROR_LOST_CONNECTION / leaving again. The host
+  # network makes the container share the Pi's network stack directly,
+  # avoiding this NAT entirely. See docs/discord-bot-setup.md for details.
   app:
     image: roleplayer:latest
-    network_mode: host
+    networks:
+      - host
     environment:
       PORT: "3002"
       HTTPS_PORT: "3502"
@@ -108,6 +111,15 @@ networks:
   internal:
     driver: overlay
     attachable: true
+  # Docker Swarm predefines a "host" network on every node (created
+  # automatically at `docker swarm init`, present since Docker 17.06+); it is
+  # NOT created by this compose file. Declaring it as `external: true` lets
+  # the `app` service attach to it for true host networking under
+  # `docker stack deploy` (plain `network_mode: host` is silently ignored by
+  # Swarm and was causing the app to fall back to an auto-created
+  # `roleplayer_default` overlay network instead).
+  host:
+    external: true
 
 volumes:
   sqlite-data:

@@ -80,13 +80,34 @@ and immediately get disconnected again (`ERROR_LOST_CONNECTION` /
 `ERROR_UDP_UNABLE_TO_CONNECT` in the logs), sometimes looping join/leave
 forever.
 
-`docker-compose.yml` now runs the `app` service with `network_mode: host`,
-so the container shares the Pi's network stack directly and Discord's UDP
-voice traffic is no longer NATed. This is why `MINIO_ENDPOINT` was changed
-from `http://minio:9000` (the overlay-network service name, no longer
-resolvable once `app` leaves the overlay network) to `http://localhost:9004`
-(MinIO's host-published port) — `app` and `minio` no longer share a Docker
-network, so they must talk to each other via the host's published ports.
+**Important:** plain `network_mode: host` in the compose file is **silently
+ignored by `docker stack deploy`** (Swarm mode does not support it —
+Docker prints "Ignoring unsupported options: network_mode" and falls back to
+an auto-created overlay network instead, e.g. `roleplayer_default`). The
+correct way to get host networking for a Swarm *service* is to attach it to
+Swarm's predefined `host` network, which every node has since
+`docker swarm init` (Docker 17.06+):
+
+```yaml
+services:
+  app:
+    networks:
+      - host
+    # no `ports:` section for app — host networking exposes the container's
+    # ports directly on the Pi, so there's nothing to publish/map.
+
+networks:
+  host:
+    external: true
+```
+
+This is what `docker-compose.yml` does now. The container shares the Pi's
+network stack directly, so Discord's UDP voice traffic is no longer NATed.
+This is also why `MINIO_ENDPOINT` was changed from `http://minio:9000` (the
+overlay-network service name, no longer resolvable once `app` is on the
+`host` network instead of `internal`) to `http://localhost:9004` (MinIO's
+host-published port) — `app` and `minio` no longer share a Docker network, so
+they must talk to each other via the host's published ports.
 
 If you still see join/leave loops or `ERROR_LOST_CONNECTION` after
 redeploying with this change, check:
@@ -94,8 +115,9 @@ redeploying with this change, check:
 - You actually redeployed the *new* stack config (`docker stack deploy`
   again after pulling) — Swarm won't pick up compose file changes
   automatically.
-- `docker service ps roleplayer_app` isn't stuck on an old task using the
-  previous network config (may need `docker stack rm roleplayer` and
-  redeploy from scratch if Swarm won't cleanly transition a running service
-  to `network_mode: host`).
+- `docker service inspect roleplayer_app` shows it's attached to the `host`
+  network (not `roleplayer_internal` or an auto-created `roleplayer_default`)
+  — `redeploy.sh` detects a mismatch here automatically and does a full
+  `docker stack rm` + redeploy, since Swarm can't migrate a running service's
+  network attachment in place.
 

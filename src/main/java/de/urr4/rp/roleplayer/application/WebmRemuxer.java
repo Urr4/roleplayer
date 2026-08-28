@@ -3,30 +3,47 @@ package de.urr4.rp.roleplayer.application;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
- * Repairs the WebM audio buffer accumulated by the browser's MediaRecorder
- * API before it is stored/played back.
+ * Combines the individual WebM "chunks" produced by the browser's
+ * MediaRecorder API into a single, well-formed WebM file with correct
+ * duration/seek metadata.
  *
- * <p>MediaRecorder emits a live-recording as a series of independent WebM
- * "chunks" via {@code ondataavailable} (roleplayer requests one every 10s so
- * partial audio survives a crash/flush). Each chunk is itself a
- * self-contained WebM segment with its own header - naively concatenating
- * their raw bytes (as the recording buffer does, appending every chunk into
- * one file) produces a byte stream that most players/browsers can decode
- * "well enough" to hear the very first chunk's audio, but whose container
- * metadata (duration, cues/seek index) only describes that first segment.
- * That's why recordings played back through the browser showed 0:00/0:00 and
- * refused to seek even though the audio itself transcribed fine (whisperX
- * doesn't care about container metadata, only raw samples).
+ * <p>MediaRecorder emits a live recording as a series of independent WebM
+ * segments via {@code ondataavailable} (roleplayer requests one every 10s so
+ * partial audio survives a crash/flush) - each chunk has its own complete
+ * EBML/WebM header. <b>Naively concatenating their raw bytes into one file
+ * does not produce a valid multi-segment WebM</b>: ffmpeg's (and every
+ * browser's) matroska/webm demuxer only reads the *first* embedded header it
+ * finds and stops at that first segment's end, ignoring everything appended
+ * afterward - even piping the whole concatenated blob back through
+ * {@code ffmpeg -i pipe:0 -c copy} does not fix this, since the demuxer has
+ * already given up after the first segment by the time it remuxes. This was
+ * verified empirically (an earlier version of this class attempted exactly
+ * that pipe-based remux and was confirmed via manual ffprobe testing to
+ * still report only the first chunk's duration) and explains why recordings
+ * played back through the browser showed 0:00/0:00 and refused to seek, even
+ * though transcription still worked (WhisperX only needs to decode whichever
+ * chunk's samples happen to be in a given delta - it doesn't care about
+ * overall container duration/seek metadata).
  *
- * <p>Fixes this by remuxing the concatenated bytes through {@code ffmpeg}
- * (stream copy, no re-encoding) into a single well-formed WebM file with
- * correct duration/seek metadata spanning the whole recording.
+ * <p>The only reliable fix is ffmpeg's {@code concat} demuxer, which is
+ * explicitly designed to stitch together a sequence of separate same-codec
+ * files into one output container with correct combined duration. This
+ * requires the original chunks to still exist as separate files on disk (raw
+ * byte concatenation cannot be un-done afterward), so
+ * {@link LiveRecordingBufferManager} keeps each incoming chunk as its own
+ * file in addition to the flat append-only buffer used for transcription
+ * delta offsets.
  */
 public final class WebmRemuxer {
 
@@ -37,83 +54,122 @@ public final class WebmRemuxer {
     }
 
     /**
-     * Remuxes concatenated WebM bytes into a single valid WebM file with
-     * correct duration metadata. Falls back to returning the original bytes
-     * unchanged (logging a warning) if {@code ffmpeg} is not installed or
-     * the remux fails for any reason, so a missing/broken ffmpeg never blocks
-     * a recording from being stored - it will just keep the pre-existing
-     * "duration shows 0:00" behavior instead of hard-failing.
+     * Concatenates the given WebM chunk files (in order) into a single
+     * well-formed WebM file with correct duration metadata, returning its
+     * bytes. Falls back to simple raw concatenation of the original chunk
+     * bytes (logging a warning, i.e. the pre-existing "duration shows 0:00"
+     * behavior) if {@code ffmpeg} is not installed or the remux fails for any
+     * reason, so a missing/broken ffmpeg never blocks a recording from being
+     * stored.
      */
-    public static byte[] fixDuration(byte[] webmBytes) {
-        if (webmBytes == null || webmBytes.length == 0) {
-            return webmBytes;
+    public static byte[] concatChunks(List<Path> chunkFiles) {
+        List<Path> existingChunks = chunkFiles.stream().filter(Files::exists).toList();
+        if (existingChunks.isEmpty()) {
+            return new byte[0];
         }
+        if (existingChunks.size() == 1) {
+            // Nothing to stitch together; a single chunk is already a valid,
+            // complete WebM file on its own (correct duration included).
+            return readBytesOrEmpty(existingChunks.get(0));
+        }
+
+        Path workDir;
         try {
+            workDir = Files.createTempDirectory("webm-remux-");
+        } catch (IOException e) {
+            log.warn("Failed to create temp directory for WebM remux; storing a raw concatenation instead"
+                    + " (duration/seeking in the player may not work correctly)", e);
+            return concatenateRawBytes(existingChunks);
+        }
+
+        try {
+            Path listFile = workDir.resolve("chunks.txt");
+            String listContent = existingChunks.stream()
+                    .map(chunk -> "file '" + chunk.toAbsolutePath() + "'")
+                    .collect(Collectors.joining("\n"));
+            Files.writeString(listFile, listContent, StandardCharsets.UTF_8);
+
+            // The concat demuxer needs an actual on-disk output file (not a
+            // pipe) - the WebM muxer seeks back to patch the duration into
+            // the header once it knows the total length, which isn't
+            // possible on a non-seekable stdout pipe (verified empirically:
+            // piping to stdout silently drops the duration metadata again).
+            Path outputFile = workDir.resolve("output.webm");
             Process process = new ProcessBuilder(
-                    "ffmpeg", "-hide_banner", "-loglevel", "error",
-                    "-fflags", "+genpts",
-                    "-i", "pipe:0",
+                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                    "-f", "concat", "-safe", "0",
+                    "-i", listFile.toAbsolutePath().toString(),
                     "-c", "copy",
                     "-f", "webm",
-                    "pipe:1")
-                    .redirectErrorStream(false)
+                    outputFile.toAbsolutePath().toString())
+                    .redirectErrorStream(true)
                     .start();
 
-            byte[][] stdoutHolder = new byte[1][];
-            Thread stdoutReader = new Thread(() -> {
-                try (InputStream in = process.getInputStream()) {
-                    stdoutHolder[0] = in.readAllBytes();
-                } catch (IOException e) {
-                    // Reported via the exit-code/timeout check below.
-                }
-            }, "webm-remux-stdout");
-            stdoutReader.start();
-
-            StringBuilder stderr = new StringBuilder();
-            Thread stderrReader = new Thread(() -> {
-                try (InputStream err = process.getErrorStream()) {
-                    stderr.append(new String(err.readAllBytes()));
-                } catch (IOException e) {
-                    // Best-effort diagnostics only.
-                }
-            }, "webm-remux-stderr");
-            stderrReader.start();
-
-            try (var stdin = process.getOutputStream()) {
-                stdin.write(webmBytes);
-            } catch (IOException e) {
-                // ffmpeg may close stdin early (e.g. it already failed to
-                // parse); the exit-code check below will surface the real
-                // failure reason via stderr.
+            String output;
+            try (var in = process.getInputStream()) {
+                output = new String(in.readAllBytes(), StandardCharsets.UTF_8);
             }
 
             boolean finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            stdoutReader.join(TimeUnit.SECONDS.toMillis(5));
-            stderrReader.join(TimeUnit.SECONDS.toMillis(5));
-
             if (!finished) {
                 process.destroyForcibly();
-                log.warn("ffmpeg WebM remux timed out after {}s; storing the unrepaired audio buffer instead"
+                log.warn("ffmpeg WebM concat timed out after {}s; storing a raw concatenation instead"
                         + " (duration/seeking in the player may not work correctly)", TIMEOUT_SECONDS);
-                return webmBytes;
+                return concatenateRawBytes(existingChunks);
             }
 
-            byte[] remuxed = stdoutHolder[0];
-            if (process.exitValue() != 0 || remuxed == null || remuxed.length == 0) {
-                log.warn("ffmpeg WebM remux failed (exit code {}): {}; storing the unrepaired audio buffer instead"
+            if (process.exitValue() != 0 || !Files.exists(outputFile) || Files.size(outputFile) == 0) {
+                log.warn("ffmpeg WebM concat failed (exit code {}): {}; storing a raw concatenation instead"
                                 + " (duration/seeking in the player may not work correctly)",
-                        process.exitValue(), stderr.toString().strip());
-                return webmBytes;
+                        process.exitValue(), output.strip());
+                return concatenateRawBytes(existingChunks);
             }
-            return remuxed;
+
+            return Files.readAllBytes(outputFile);
         } catch (IOException e) {
-            log.warn("ffmpeg is not available to remux the recorded WebM audio ({}); storing the unrepaired"
-                    + " audio buffer instead (duration/seeking in the player may not work correctly)",
-                    e.getMessage());
-            return webmBytes;
+            log.warn("ffmpeg is not available to remux the recorded WebM audio ({}); storing a raw concatenation"
+                    + " instead (duration/seeking in the player may not work correctly)", e.getMessage());
+            return concatenateRawBytes(existingChunks);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new UncheckedIOException(new IOException("Interrupted while remuxing WebM audio", e));
+        } finally {
+            deleteRecursively(workDir);
+        }
+    }
+
+    private static byte[] concatenateRawBytes(List<Path> chunkFiles) {
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            for (Path chunk : chunkFiles) {
+                out.write(Files.readAllBytes(chunk));
+            }
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to concatenate WebM chunk files", e);
+        }
+    }
+
+    private static byte[] readBytesOrEmpty(Path path) {
+        try {
+            return Files.readAllBytes(path);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read WebM chunk file " + path, e);
+        }
+    }
+
+    private static void deleteRecursively(Path dir) {
+        try (var walk = Files.walk(dir)) {
+            walk.sorted((a, b) -> b.getNameCount() - a.getNameCount())
+                    .forEach(path -> {
+                        try {
+                            Files.deleteIfExists(path);
+                        } catch (IOException e) {
+                            log.debug("Failed to delete temp remux file {}", path, e);
+                        }
+                    });
+        } catch (IOException e) {
+            log.debug("Failed to clean up temp remux directory {}", dir, e);
         }
     }
 }

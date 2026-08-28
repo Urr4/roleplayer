@@ -2,6 +2,7 @@ package de.urr4.rp.roleplayer.adapter.discord;
 
 import de.urr4.rp.roleplayer.domain.port.out.VoiceChannelCapture;
 import net.dv8tion.jda.api.JDA;
+import net.dv8tion.jda.api.audio.AudioNatives;
 import net.dv8tion.jda.api.audio.AudioReceiveHandler;
 import net.dv8tion.jda.api.audio.CombinedAudio;
 import net.dv8tion.jda.api.audio.UserAudio;
@@ -54,6 +55,23 @@ public class JdaVoiceChannelCapture implements VoiceChannelCapture {
                                Consumer<String> onConnectionLost) {
         if (jda == null) {
             throw new IllegalStateException("Discord bot is not configured");
+        }
+        // JDA's voice pipeline depends on the native Opus codec being usable
+        // (club.minnced:opus-java, which on architectures without a bundled
+        // native binary - e.g. this app's arm64/Raspberry Pi target - falls
+        // back to loading the OS-level libopus.so via JNA, see
+        // docs/discord-bot-setup.md #5). If that fails, JDA does not throw a
+        // clear error: it still lets the bot join the channel over the voice
+        // websocket, but then the encoder/decoder setup inside
+        // AudioConnection fails once real audio needs to flow, and JDA tears
+        // the connection back down - which looks exactly like "the bot joins,
+        // then immediately leaves" with no obvious error unless you go
+        // looking for Opus-related warnings in the logs. Checking this
+        // up-front turns that into an immediate, clear failure instead.
+        if (!AudioNatives.ensureOpus()) {
+            throw new IllegalStateException("The Opus audio codec native library could not be loaded on this host"
+                    + " (required for Discord voice) - Discord voice recording cannot work. Check that libopus0 is"
+                    + " installed in the container/host and see docs/discord-bot-setup.md #5.");
         }
         VoiceChannel channel = jda.getChannelById(VoiceChannel.class, discordChannelId);
         if (channel == null) {

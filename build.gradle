@@ -22,14 +22,31 @@ configurations {
 
 repositories {
     mavenCentral()
+    maven {
+        url = uri('https://maven.lavalink.dev/snapshots')
+    }
 }
+
+// libdave-jvm (DAVE E2EE protocol support, required for Discord voice since
+// March 2026 - close code 4017 otherwise, see docs/discord-bot-setup.md #5)
+// is only published as "git commit" versions, not semver releases.
+def libdaveVersion = 'ce725965e'
 
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-    implementation 'net.dv8tion:JDA:5.1.2'
+    implementation 'net.dv8tion:JDA:6.5.0'
     implementation 'club.minnced:opus-java:1.1.1'
+
+    // ── Discord DAVE protocol (mandatory E2EE for voice since March 2026) ──────
+    implementation "moe.kyokobot.libdave:adapter-jda:${libdaveVersion}"
+    implementation "moe.kyokobot.libdave:impl-jni:${libdaveVersion}"
+    // Raspberry Pi runtime is linux/arm64 (aarch64); add the matching native
+    // libdave bindings. If ever running the app on a different platform
+    // (e.g. local x86-64 dev machine), add the matching natives-* artifact
+    // too, or the DaveSessionFactory will fail to load its native library.
+    runtimeOnly "moe.kyokobot.libdave:natives-linux-aarch64:${libdaveVersion}"
 
     // ── SQLite ────────────────────────────────────────────────────────────────
     implementation 'org.xerial:sqlite-jdbc:3.46.1.3'

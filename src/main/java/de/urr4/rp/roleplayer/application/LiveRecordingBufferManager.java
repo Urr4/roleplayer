@@ -132,6 +132,19 @@ public class LiveRecordingBufferManager {
             Recording recording = requireRecording(recordingId);
             requireStatus(recording, RecordingStatus.RECORDING, "Recording is not currently capturing audio");
             appendBytes(buffer.audioBufferPath(), chunkBytes, recordingId);
+            // For WebM sources (microphone), each MediaRecorder chunk is a
+            // self-contained WebM segment with its own header - raw byte
+            // concatenation (above, still used for transcription delta
+            // offsets) does not produce a valid multi-segment WebM file. Keep
+            // every chunk as its own file too so the final stored audio can
+            // be stitched together with ffmpeg's concat demuxer, which is the
+            // only reliable way to get correct duration/seek metadata - see
+            // WebmRemuxer for details.
+            if ("webm".equalsIgnoreCase(buffer.fileExtension()) && chunkBytes != null && chunkBytes.length > 0) {
+                Path chunkPath = createWebmChunkFile(recordingId, buffer.nextChunkIndex());
+                writeBytes(chunkPath, chunkBytes, recordingId);
+                buffer.registerWebmChunkFile(chunkPath);
+            }
             buffer.markCombinedChunkWritten(chunkBytes == null ? 0 : chunkBytes.length, Instant.now(clock));
         }
     }
@@ -383,6 +396,18 @@ public class LiveRecordingBufferManager {
         }
     }
 
+    private Path createWebmChunkFile(String recordingId, int chunkIndex) {
+        return bufferDirectory.resolve(recordingId + "--chunk-" + chunkIndex + ".webm");
+    }
+
+    private static void writeBytes(Path path, byte[] bytes, String recordingId) {
+        try {
+            Files.write(path, bytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to write WebM chunk file for recording " + recordingId, e);
+        }
+    }
+
     private static byte[] readAllBytes(Path bufferPath, String recordingId) {
         try {
             return Files.exists(bufferPath) ? Files.readAllBytes(bufferPath) : new byte[0];
@@ -428,6 +453,11 @@ public class LiveRecordingBufferManager {
         private final String discordChannelId;
         private final boolean writeTranscriptToChat;
         private final Map<String, DiscordUserBuffer> discordUserBuffers = new HashMap<>();
+        // Ordered list of individual WebM chunk files (microphone source
+        // only) - see WebmRemuxer for why these must be kept as separate
+        // files rather than only relying on the flat append-only buffer.
+        private final List<Path> webmChunkFiles = new ArrayList<>();
+        private int nextChunkIndex;
         private Instant firstChunkAt;
         private Instant lastChunkAt;
         private Instant activeSince;
@@ -452,6 +482,14 @@ public class LiveRecordingBufferManager {
 
         private Path audioBufferPath() {
             return audioBufferPath;
+        }
+
+        private int nextChunkIndex() {
+            return nextChunkIndex++;
+        }
+
+        private void registerWebmChunkFile(Path chunkPath) {
+            webmChunkFiles.add(chunkPath);
         }
 
         private String fileExtension() {
@@ -559,12 +597,16 @@ public class LiveRecordingBufferManager {
             if (storedAudioRequiresWavHeader) {
                 return WavFileWriter.pcm16Stereo48kHz(fullBufferBytes);
             }
-            // Microphone recordings are stored as concatenated MediaRecorder
-            // WebM chunks (see startLiveRecording/MICROPHONE_RECORDING_EXTENSION)
-            // - remux them into a single well-formed WebM container so
-            // duration/seeking work in the browser's audio player.
+            // Microphone recordings arrive as a series of independent
+            // MediaRecorder WebM chunks (see
+            // startLiveRecording/MICROPHONE_RECORDING_EXTENSION); stitch the
+            // individual chunk files (not the raw flat buffer, which is only
+            // valid for byte-offset tracking) together with ffmpeg's concat
+            // demuxer so duration/seeking work correctly in the browser's
+            // audio player - see WebmRemuxer for why raw concatenation alone
+            // does not work.
             if ("webm".equalsIgnoreCase(fileExtension)) {
-                return WebmRemuxer.fixDuration(fullBufferBytes);
+                return WebmRemuxer.concatChunks(webmChunkFiles);
             }
             return fullBufferBytes;
         }
@@ -598,6 +640,7 @@ public class LiveRecordingBufferManager {
         private List<Path> allBufferPaths() {
             List<Path> paths = new ArrayList<>();
             paths.add(audioBufferPath);
+            paths.addAll(webmChunkFiles);
             discordUserBuffers.values().stream()
                     .map(DiscordUserBuffer::bufferPath)
                     .forEach(paths::add);

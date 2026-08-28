@@ -22,9 +22,10 @@ public class RecordingEntity {
     private Instant endedAt;
     private String audioObjectKey;
     private String transcriptObjectKey;
+    private String errorMessage;
     protected RecordingEntity() {}
-    public RecordingEntity(String id, String chronicleId, String adventureId, RecordingSource source, RecordingStatus status, Instant startedAt, Instant endedAt, String audioObjectKey, String transcriptObjectKey) {
-        this.id=id; this.chronicleId=chronicleId; this.adventureId=adventureId; this.source=source; this.status=status; this.startedAt=startedAt; this.endedAt=endedAt; this.audioObjectKey=audioObjectKey; this.transcriptObjectKey=transcriptObjectKey;
+    public RecordingEntity(String id, String chronicleId, String adventureId, RecordingSource source, RecordingStatus status, Instant startedAt, Instant endedAt, String audioObjectKey, String transcriptObjectKey, String errorMessage) {
+        this.id=id; this.chronicleId=chronicleId; this.adventureId=adventureId; this.source=source; this.status=status; this.startedAt=startedAt; this.endedAt=endedAt; this.audioObjectKey=audioObjectKey; this.transcriptObjectKey=transcriptObjectKey; this.errorMessage=errorMessage;
     }
     public String getId() { return id; }
     public String getChronicleId() { return chronicleId; }
@@ -35,4 +36,5 @@ public class RecordingEntity {
     public Instant getEndedAt() { return endedAt; }
     public String getAudioObjectKey() { return audioObjectKey; }
     public String getTranscriptObjectKey() { return transcriptObjectKey; }
+    public String getErrorMessage() { return errorMessage; }
 }

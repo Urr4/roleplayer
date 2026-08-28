@@ -175,6 +175,10 @@ public class LiveRecordingBufferManager {
     }
 
     public Recording fail(String recordingId) {
+        return fail(recordingId, null);
+    }
+
+    public Recording fail(String recordingId, String errorMessage) {
         ManagedRecordingBuffer buffer = buffers.remove(recordingId);
         Recording recording = requireRecording(recordingId);
         if (buffer != null) {
@@ -183,7 +187,7 @@ public class LiveRecordingBufferManager {
                 deleteBufferArtifacts(buffer);
             }
         }
-        return saveRecording(recording, RecordingStatus.FAILED, Instant.now(clock));
+        return saveRecording(recording, RecordingStatus.FAILED, Instant.now(clock), errorMessage);
     }
 
     public void flushRecordingsDue() {
@@ -237,7 +241,8 @@ public class LiveRecordingBufferManager {
             }
             log.warn("Marking orphaned recording {} (status {}) as FAILED after restart", recording.id(),
                     recording.status());
-            saveRecording(recording, RecordingStatus.FAILED, Instant.now(clock));
+            saveRecording(recording, RecordingStatus.FAILED, Instant.now(clock),
+                    "Recording was interrupted by a server restart.");
         }
     }
 
@@ -330,8 +335,13 @@ public class LiveRecordingBufferManager {
     }
 
     private Recording saveRecording(Recording recording, RecordingStatus status, Instant endedAt) {
+        return saveRecording(recording, status, endedAt, status == RecordingStatus.FAILED ? recording.errorMessage() : null);
+    }
+
+    private Recording saveRecording(Recording recording, RecordingStatus status, Instant endedAt, String errorMessage) {
         return recordingRepository.save(new Recording(recording.id(), recording.chronicleId(), recording.adventureId(),
-                recording.source(), status, recording.startedAt(), endedAt, recording.audioObjectKey(), recording.transcriptObjectKey()));
+                recording.source(), status, recording.startedAt(), endedAt, recording.audioObjectKey(), recording.transcriptObjectKey(),
+                errorMessage));
     }
 
     private Recording requireRecording(String recordingId) {

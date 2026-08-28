@@ -66,7 +66,7 @@ class RecordingProcessingService {
             log.error("Failed to store uploaded recording audio {}", recording.id(), e);
             recordingRepository.save(new Recording(recording.id(), recording.chronicleId(), recording.adventureId(), recording.source(),
                     RecordingStatus.FAILED, recording.startedAt(), Instant.now(), recording.audioObjectKey(),
-                    recording.transcriptObjectKey()));
+                    recording.transcriptObjectKey(), "Failed to store the uploaded audio: " + e.getMessage()));
             throw new IllegalStateException("Failed to store uploaded recording audio " + recording.id(), e);
         }
 
@@ -89,14 +89,15 @@ class RecordingProcessingService {
                     recording.id(), e);
             recordingRepository.save(new Recording(recording.id(), recording.chronicleId(), recording.adventureId(), recording.source(),
                     RecordingStatus.AWAITING_ASR, recording.startedAt(), recording.endedAt(), audioObjectKey,
-                    recording.transcriptObjectKey()));
+                    recording.transcriptObjectKey(),
+                    "ASR service is currently unreachable; transcription will be retried automatically."));
         } catch (Exception e) {
             log.error("Failed to process uploaded recording {}", recording.id(), e);
             // Persist FAILED so polling clients can observe terminal state even when
             // the async transcription job throws.
             recordingRepository.save(new Recording(recording.id(), recording.chronicleId(), recording.adventureId(), recording.source(),
                     RecordingStatus.FAILED, recording.startedAt(), Instant.now(), audioObjectKey,
-                    recording.transcriptObjectKey()));
+                    recording.transcriptObjectKey(), "Transcription failed: " + e.getMessage()));
             throw new IllegalStateException("Failed to process uploaded recording " + recording.id(), e);
         }
     }
@@ -127,7 +128,7 @@ class RecordingProcessingService {
             log.error("Failed to retry transcription for recording {}", recording.id(), e);
             recordingRepository.save(new Recording(recording.id(), recording.chronicleId(), recording.adventureId(), recording.source(),
                     RecordingStatus.FAILED, recording.startedAt(), Instant.now(), recording.audioObjectKey(),
-                    recording.transcriptObjectKey()));
+                    recording.transcriptObjectKey(), "Transcription failed: " + e.getMessage()));
         }
     }
 

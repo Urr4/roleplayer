@@ -68,6 +68,7 @@ export interface RecordingDto {
   audioObjectKey: string | null;
   transcriptObjectKey: string | null;
   audioUrl: string | null;
+  errorMessage: string | null;
 }
 
 export interface TranscriptSegmentDto {

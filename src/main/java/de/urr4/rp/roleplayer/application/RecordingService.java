@@ -98,7 +98,8 @@ public class RecordingService {
                 writeTranscriptToChat);
         try {
             capture.joinAndCapture(recording.id(), trimmedChannelId,
-                    liveRecordingBufferManager.createDiscordAudioSink(recording.id()));
+                    liveRecordingBufferManager.createDiscordAudioSink(recording.id()),
+                    reason -> handleDiscordConnectionLost(recording.id(), trimmedChannelId, reason));
             try {
                 capture.sendChatMessage(trimmedChannelId, "Ich beginne mit der Aufzeichnung!");
             } catch (RuntimeException e) {
@@ -106,9 +107,21 @@ public class RecordingService {
             }
             return recording;
         } catch (RuntimeException e) {
-            liveRecordingBufferManager.fail(recording.id());
+            liveRecordingBufferManager.fail(recording.id(), "Failed to join Discord voice channel: " + e.getMessage());
             throw e;
         }
+    }
+
+    /**
+     * Invoked (from a background thread) when the Discord voice connection
+     * for a live recording fails to establish or drops unexpectedly. Marks
+     * the recording as FAILED with a human-readable reason so it stops
+     * silently "recording" with dead Pause/Complete buttons, and leaves the
+     * Discord channel so the bot doesn't linger connected with no capture.
+     */
+    private void handleDiscordConnectionLost(String recordingId, String discordChannelId, String reason) {
+        voiceChannelCapture.ifPresent(capture -> capture.leave(recordingId));
+        liveRecordingBufferManager.fail(recordingId, reason);
     }
 
     public List<VoiceChannelCapture.DiscordGuild> listDiscordGuilds() {

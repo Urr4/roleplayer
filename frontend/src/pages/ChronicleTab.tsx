@@ -286,8 +286,21 @@ export default function ChronicleTab({
     if (!expandedAdventureId) return;
     const interval = window.setInterval(() => {
       void fetchRecordingState(expandedAdventureId).then(({ liveRecordingAdventureId: currentLiveRecordingAdventureId, liveRecording: currentLiveRecording, recordings }) => {
+        // If the recording we were tracking as "live" just transitioned to
+        // FAILED (e.g. the Discord bot lost the voice connection in the
+        // background), surface the reason instead of silently clearing the
+        // state and leaving the user with no explanation.
+        setLiveRecording(previousLiveRecording => {
+          if (previousLiveRecording && !currentLiveRecording) {
+            const failedRecording = recordings.find(recording => recording.id === previousLiveRecording.id
+                && recording.status === 'FAILED');
+            if (failedRecording) {
+              setError(failedRecording.errorMessage ?? 'The recording failed unexpectedly. Please check the logs.');
+            }
+          }
+          return currentLiveRecording;
+        });
         setLiveRecordingAdventureId(currentLiveRecordingAdventureId);
-        setLiveRecording(currentLiveRecording);
         setAdventureRecordings(recordings);
       });
     }, 5000);
@@ -1092,6 +1105,11 @@ export default function ChronicleTab({
                                               ? 'Audio stored — waiting for the ASR service to become reachable to transcribe it.'
                                               : 'Audio not available yet.'}
                                           </Typography>
+                                        )}
+                                        {recording.status === 'FAILED' && recording.errorMessage && (
+                                          <Alert severity="error" sx={{ mt: 0.5 }}>
+                                            {recording.errorMessage}
+                                          </Alert>
                                         )}
                                       </Box>
                                     ))}

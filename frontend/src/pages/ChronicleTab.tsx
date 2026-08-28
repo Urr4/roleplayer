@@ -150,6 +150,7 @@ export default function ChronicleTab({
 
   const [recordDialogOpen, setRecordDialogOpen] = useState(false);
   const [recordDialogAdventureId, setRecordDialogAdventureId] = useState<string | null>(null);
+  const [fullTranscriptOpen, setFullTranscriptOpen] = useState(false);
   const [recordPromptAdventureId, setRecordPromptAdventureId] = useState<string | null>(null);
   const [discordGuilds, setDiscordGuilds] = useState<DiscordGuildDto[]>([]);
   const [discordGuildsLoading, setDiscordGuildsLoading] = useState(false);
@@ -1142,6 +1143,7 @@ export default function ChronicleTab({
                                     liveRecordingAdventureId === expandedAdventureId &&
                                     (liveRecording?.status === 'RECORDING' || liveRecording?.status === 'PAUSED')
                                   }
+                                  onOpenFull={() => setFullTranscriptOpen(true)}
                                 />
                               </Box>
                             </Box>
@@ -1165,6 +1167,27 @@ export default function ChronicleTab({
           </IconButton>
         </DialogTitle>
         <DialogContent sx={{ height: '75vh' }}>{viewerUrl && <embed src={viewerUrl} type="application/pdf" width="100%" height="100%" />}</DialogContent>
+      </Dialog>
+
+      <Dialog open={fullTranscriptOpen} onClose={() => setFullTranscriptOpen(false)} maxWidth="md" fullWidth fullScreen>
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          Full Transcript
+          <IconButton onClick={() => setFullTranscriptOpen(false)}>
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent>
+          {expandedAdventureId && (
+            <TranscriptPanel
+              adventureId={expandedAdventureId}
+              isLive={
+                liveRecordingAdventureId === expandedAdventureId &&
+                (liveRecording?.status === 'RECORDING' || liveRecording?.status === 'PAUSED')
+              }
+              variant="full"
+            />
+          )}
+        </DialogContent>
       </Dialog>
 
       <Dialog

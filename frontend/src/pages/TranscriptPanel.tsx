@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Box, List, ListItem, ListItemText, Stack, Typography } from '@mui/material';
+import { Box, IconButton, List, ListItem, ListItemText, Stack, Tooltip, Typography } from '@mui/material';
+import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import type { TranscriptSegmentDto } from '../types';
 import { getAdventureTranscript, subscribeToAdventureTranscript } from '../api/client';
 
@@ -7,6 +8,10 @@ interface Props {
   adventureId: string;
   /** Whether a recording is currently RECORDING/PAUSED for this adventure — controls the live SSE subscription. */
   isLive: boolean;
+  /** 'compact' (default) shows a height-limited preview with a button to open the full view; 'full' shows the entire transcript with no height limit. */
+  variant?: 'compact' | 'full';
+  /** Called when the user clicks the "open full transcript" action (only relevant in 'compact' mode). */
+  onOpenFull?: () => void;
 }
 
 function formatElapsed(ms: number): string {
@@ -16,11 +21,12 @@ function formatElapsed(ms: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-export default function TranscriptPanel({ adventureId, isLive }: Props) {
+export default function TranscriptPanel({ adventureId, isLive, variant = 'compact', onOpenFull }: Props) {
   const [segments, setSegments] = useState<TranscriptSegmentDto[]>([]);
   const seenIds = useRef<Set<string>>(new Set());
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const previousLiveStateRef = useRef({ adventureId, isLive });
+
 
   useEffect(() => {
     seenIds.current = new Set();
@@ -90,13 +96,22 @@ export default function TranscriptPanel({ adventureId, isLive }: Props) {
 
   return (
     <Box>
-      <Typography variant="h5" gutterBottom>
-        🎙️ Adventure Transcript {isLive && <Typography component="span" color="error">● live</Typography>}
-      </Typography>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+        <Typography variant="h5" gutterBottom>
+          🎙️ Adventure Transcript {isLive && <Typography component="span" color="error">● live</Typography>}
+        </Typography>
+        {variant === 'compact' && onOpenFull && (
+          <Tooltip title="Open full transcript">
+            <IconButton onClick={onOpenFull} size="small">
+              <OpenInFullIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
+      </Stack>
       <Box
         sx={{
-          maxHeight: 320,
-          overflowY: 'auto',
+          maxHeight: variant === 'full' ? 'none' : 320,
+          overflowY: variant === 'full' ? 'visible' : 'auto',
           border: '1px solid rgba(58,36,22,0.3)',
           bgcolor: 'rgba(0,0,0,0.03)',
         }}

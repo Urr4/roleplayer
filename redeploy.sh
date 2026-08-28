@@ -81,20 +81,43 @@ if docker service inspect "${STACK}_app" >/dev/null 2>&1; then
     echo "    network_mode: host — Swarm can't migrate this in place. Removing the stack so it can be"
     echo "    recreated cleanly …"
     docker stack rm "${STACK}"
-    echo "==> Waiting for the stack to fully tear down …"
+    echo "==> Waiting for the stack's services to fully tear down …"
     for _ in $(seq 1 30); do
       docker service inspect "${STACK}_app" >/dev/null 2>&1 || break
+      sleep 2
+    done
+    # Removing a stack also tears down its overlay network(s) asynchronously,
+    # *after* the services are gone. If `stack deploy` runs again before that
+    # teardown finishes, it can see the network still present at the moment
+    # it lists networks (skipping re-creation) but find it gone by the time
+    # it actually creates a dependent service — surfacing as
+    # "network roleplayer_internal not found" while creating other services.
+    # Wait for the network to disappear too, not just the services.
+    echo "==> Waiting for the stack's overlay network to fully tear down …"
+    for _ in $(seq 1 30); do
+      docker network inspect "${STACK}_internal" >/dev/null 2>&1 || break
       sleep 2
     done
   fi
 fi
 
 echo "==> Deploying stack '${STACK}' …"
-MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-roleplayer}" \
-MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-roleplayer123}" \
-ASR_URL="${ASR_URL:-http://Stefans-PC:9090}" \
-DISCORD_BOT_TOKEN="${DISCORD_BOT_TOKEN:-}" \
-docker stack deploy -c "${SCRIPT_DIR}/docker-compose.yml" "${STACK}"
+deploy_stack() {
+  MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-roleplayer}" \
+  MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-roleplayer123}" \
+  ASR_URL="${ASR_URL:-http://Stefans-PC:9090}" \
+  DISCORD_BOT_TOKEN="${DISCORD_BOT_TOKEN:-}" \
+  docker stack deploy -c "${SCRIPT_DIR}/docker-compose.yml" "${STACK}"
+}
+# A prior stack removal's network teardown can still be finishing up even
+# after the wait loop above gives up (worst case ~60s) — retry once after a
+# short pause instead of failing outright on the classic
+# "network roleplayer_internal not found" race.
+if ! deploy_stack; then
+  echo "==> Stack deploy failed (possibly a network teardown race) — retrying once in 10s …"
+  sleep 10
+  deploy_stack
+fi
 
 # ── 3. Force the app service onto the freshly built image ────────────────────
 # docker stack deploy with a ":latest" tag does NOT restart already-running

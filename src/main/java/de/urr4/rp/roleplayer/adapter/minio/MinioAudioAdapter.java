@@ -59,6 +59,15 @@ public class MinioAudioAdapter implements AudioStore {
     }
 
     @Override
+    public byte[] fetch(String objectKey) {
+        try (var response = s3Client.getObject(GetObjectRequest.builder().bucket(bucket).key(objectKey).build())) {
+            return response.readAllBytes();
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("Failed to fetch audio object " + objectKey, e);
+        }
+    }
+
+    @Override
     public void delete(String objectKey) {
         s3Client.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(objectKey).build());
     }

@@ -8,6 +8,13 @@ public interface AudioStore {
     String store(String objectKey, byte[] data, String contentType);
 
     /**
+     * Retrieves the raw bytes previously stored under the given object key.
+     * Used to re-attempt transcription for recordings awaiting ASR
+     * availability, since the original in-memory bytes aren't retained.
+     */
+    byte[] fetch(String objectKey);
+
+    /**
      * Returns a URL the browser can use directly (e.g. presigned) to fetch the
      * audio, valid for a limited time.
      */

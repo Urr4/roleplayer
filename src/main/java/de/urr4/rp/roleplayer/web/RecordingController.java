@@ -1,6 +1,8 @@
 package de.urr4.rp.roleplayer.web;
 
 import de.urr4.rp.roleplayer.application.RecordingService;
+import de.urr4.rp.roleplayer.domain.model.Recording;
+import de.urr4.rp.roleplayer.domain.port.out.AudioStore;
 import de.urr4.rp.roleplayer.domain.model.RecordingSource;
 import de.urr4.rp.roleplayer.web.dto.RecordingDto;
 import de.urr4.rp.roleplayer.web.dto.StartRecordingRequest;
@@ -26,21 +28,30 @@ import java.util.NoSuchElementException;
 public class RecordingController {
 
     private final RecordingService recordingService;
+    private final AudioStore audioStore;
 
-    public RecordingController(RecordingService recordingService) {
+    public RecordingController(RecordingService recordingService, AudioStore audioStore) {
         this.recordingService = recordingService;
+        this.audioStore = audioStore;
+    }
+
+    private RecordingDto toDto(Recording recording) {
+        String audioUrl = recording.audioObjectKey() == null || recording.audioObjectKey().isBlank()
+                ? null
+                : audioStore.presignedUrl(recording.audioObjectKey());
+        return RecordingDto.from(recording, audioUrl);
     }
 
     @GetMapping
     public List<RecordingDto> list(@PathVariable String adventureId) {
-        return recordingService.listRecordings(adventureId).stream().map(RecordingDto::from).toList();
+        return recordingService.listRecordings(adventureId).stream().map(this::toDto).toList();
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<RecordingDto> upload(@PathVariable String adventureId, @RequestParam("file") MultipartFile file) {
         try {
             return ResponseEntity.accepted()
-                    .body(RecordingDto.from(recordingService.uploadAndTranscribe(adventureId, file.getOriginalFilename(),
+                    .body(toDto(recordingService.uploadAndTranscribe(adventureId, file.getOriginalFilename(),
                             file.getBytes(), file.getContentType())));
         } catch (NoSuchElementException e) {
             return ResponseEntity.notFound().build();
@@ -57,7 +68,7 @@ public class RecordingController {
             String discordChannelId = parseDiscordChannelId(source, request);
             boolean writeTranscriptToChat = request != null && request.resolvedWriteTranscriptToChat();
             return ResponseEntity.accepted()
-                    .body(RecordingDto.from(recordingService.startLiveRecording(adventureId, source, discordChannelId,
+                    .body(toDto(recordingService.startLiveRecording(adventureId, source, discordChannelId,
                             writeTranscriptToChat)));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
@@ -83,7 +94,7 @@ public class RecordingController {
     @PostMapping("/{recordingId}/pause")
     public ResponseEntity<RecordingDto> pause(@PathVariable String recordingId) {
         try {
-            return ResponseEntity.ok(RecordingDto.from(recordingService.pauseLiveRecording(recordingId)));
+            return ResponseEntity.ok(toDto(recordingService.pauseLiveRecording(recordingId)));
         } catch (NoSuchElementException e) {
             return ResponseEntity.notFound().build();
         } catch (IllegalStateException e) {
@@ -94,7 +105,7 @@ public class RecordingController {
     @PostMapping("/{recordingId}/resume")
     public ResponseEntity<RecordingDto> resume(@PathVariable String recordingId) {
         try {
-            return ResponseEntity.ok(RecordingDto.from(recordingService.resumeLiveRecording(recordingId)));
+            return ResponseEntity.ok(toDto(recordingService.resumeLiveRecording(recordingId)));
         } catch (NoSuchElementException e) {
             return ResponseEntity.notFound().build();
         } catch (IllegalStateException e) {
@@ -105,7 +116,7 @@ public class RecordingController {
     @PostMapping("/{recordingId}/stop")
     public ResponseEntity<RecordingDto> stop(@PathVariable String recordingId) {
         try {
-            return ResponseEntity.ok(RecordingDto.from(recordingService.stopLiveRecording(recordingId)));
+            return ResponseEntity.ok(toDto(recordingService.stopLiveRecording(recordingId)));
         } catch (NoSuchElementException e) {
             return ResponseEntity.notFound().build();
         } catch (IllegalStateException e) {

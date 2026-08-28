@@ -69,7 +69,11 @@ for voice support).
   `../mealplaner`) running the [`whisperx-server`](https://github.com/Urr4/whisperx-server)
   transcription service — it needs to exist and be reachable; see that
   repo for setup instructions. Set `ASR_URL` to point at it (defaults to
-  `http://Stefans-PC:9090`).
+  `http://Stefans-PC:9090`). If that machine is temporarily unreachable
+  (e.g. turned off) when a file is uploaded, the audio is still stored
+  safely and the recording is automatically retranscribed in the
+  background once the service becomes reachable again — no re-upload
+  needed.
 - Optionally, a free Discord bot token for Discord voice recording — see
   [`docs/discord-bot-setup.md`](docs/discord-bot-setup.md). Set
   `DISCORD_BOT_TOKEN`; leave it unset to disable Discord recording entirely.

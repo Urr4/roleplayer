@@ -25,6 +25,11 @@ public class InMemoryAudioStore implements AudioStore {
     }
 
     @Override
+    public byte[] fetch(String objectKey) {
+        return store.getOrDefault(objectKey, new byte[0]);
+    }
+
+    @Override
     public void delete(String objectKey) {
         store.remove(objectKey);
     }

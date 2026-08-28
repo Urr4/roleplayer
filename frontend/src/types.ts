@@ -55,7 +55,7 @@ export interface AttributePools {
 
 // ── Recordings & transcripts ─────────────────────────────────────────────────
 export type RecordingSource = 'UPLOAD' | 'MICROPHONE' | 'DISCORD';
-export type RecordingStatus = 'RECORDING' | 'PAUSED' | 'STOPPED' | 'PROCESSING' | 'DONE' | 'FAILED';
+export type RecordingStatus = 'RECORDING' | 'PAUSED' | 'STOPPED' | 'PROCESSING' | 'AWAITING_ASR' | 'DONE' | 'FAILED';
 
 export interface RecordingDto {
   id: string;
@@ -67,6 +67,7 @@ export interface RecordingDto {
   endedAt: string | null;
   audioObjectKey: string | null;
   transcriptObjectKey: string | null;
+  audioUrl: string | null;
 }
 
 export interface TranscriptSegmentDto {

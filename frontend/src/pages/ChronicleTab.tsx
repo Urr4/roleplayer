@@ -75,6 +75,51 @@ interface Props {
   onActiveAdventureChanged: (adventure: AdventureDto | null) => void;
 }
 
+function recordingSourceLabel(source: RecordingDto['source']): string {
+  switch (source) {
+    case 'UPLOAD':
+      return 'Uploaded file';
+    case 'MICROPHONE':
+      return 'Microphone';
+    case 'DISCORD':
+      return 'Discord';
+    default:
+      return source;
+  }
+}
+
+function recordingStatusLabel(status: RecordingDto['status']): string {
+  switch (status) {
+    case 'RECORDING':
+      return 'Recording';
+    case 'PAUSED':
+      return 'Paused';
+    case 'STOPPED':
+      return 'Stopped';
+    case 'PROCESSING':
+      return 'Transcribing…';
+    case 'AWAITING_ASR':
+      return 'Waiting for ASR service';
+    case 'DONE':
+      return 'Transcribed';
+    case 'FAILED':
+      return 'Failed';
+    default:
+      return status;
+  }
+}
+
+function formatRecordingTimeRange(startedAt: string, endedAt: string | null): string {
+  const start = new Date(startedAt);
+  const startLabel = Number.isNaN(start.getTime()) ? startedAt : start.toLocaleString();
+  if (!endedAt) {
+    return `${startLabel} – ongoing`;
+  }
+  const end = new Date(endedAt);
+  const endLabel = Number.isNaN(end.getTime()) ? endedAt : end.toLocaleTimeString();
+  return `${startLabel} – ${endLabel}`;
+}
+
 export default function ChronicleTab({
   chronicles,
   activeChronicleId,
@@ -116,6 +161,7 @@ export default function ChronicleTab({
   const [discordConfirmOpen, setDiscordConfirmOpen] = useState(false);
   const [liveRecording, setLiveRecording] = useState<RecordingDto | null>(null);
   const [liveRecordingAdventureId, setLiveRecordingAdventureId] = useState<string | null>(null);
+  const [adventureRecordings, setAdventureRecordings] = useState<RecordingDto[]>([]);
   const [recordingBusy, setRecordingBusy] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
@@ -160,7 +206,7 @@ export default function ChronicleTab({
   const fetchRecordingState = useCallback(
     async (adventureId: string | null) => {
       if (!adventureId) {
-        return { liveRecordingAdventureId: null, liveRecording: null as RecordingDto | null };
+        return { liveRecordingAdventureId: null, liveRecording: null as RecordingDto | null, recordings: [] as RecordingDto[] };
       }
 
       try {
@@ -169,9 +215,10 @@ export default function ChronicleTab({
         return {
           liveRecordingAdventureId: inProgress ? adventureId : null,
           liveRecording: inProgress ?? null,
+          recordings,
         };
       } catch {
-        return { liveRecordingAdventureId: null, liveRecording: null as RecordingDto | null };
+        return { liveRecordingAdventureId: null, liveRecording: null as RecordingDto | null, recordings: [] as RecordingDto[] };
       }
     },
     [],
@@ -219,10 +266,11 @@ export default function ChronicleTab({
 
   useEffect(() => {
     let cancelled = false;
-    void fetchRecordingState(expandedAdventureId).then(({ liveRecordingAdventureId: currentLiveRecordingAdventureId, liveRecording: currentLiveRecording }) => {
+    void fetchRecordingState(expandedAdventureId).then(({ liveRecordingAdventureId: currentLiveRecordingAdventureId, liveRecording: currentLiveRecording, recordings }) => {
       if (cancelled) return;
       setLiveRecordingAdventureId(currentLiveRecordingAdventureId);
       setLiveRecording(currentLiveRecording);
+      setAdventureRecordings(recordings);
     });
 
     return () => {
@@ -237,9 +285,10 @@ export default function ChronicleTab({
   useEffect(() => {
     if (!expandedAdventureId) return;
     const interval = window.setInterval(() => {
-      void fetchRecordingState(expandedAdventureId).then(({ liveRecordingAdventureId: currentLiveRecordingAdventureId, liveRecording: currentLiveRecording }) => {
+      void fetchRecordingState(expandedAdventureId).then(({ liveRecordingAdventureId: currentLiveRecordingAdventureId, liveRecording: currentLiveRecording, recordings }) => {
         setLiveRecordingAdventureId(currentLiveRecordingAdventureId);
         setLiveRecording(currentLiveRecording);
+        setAdventureRecordings(recordings);
       });
     }, 5000);
     return () => window.clearInterval(interval);
@@ -426,6 +475,7 @@ export default function ChronicleTab({
       const state = await fetchRecordingState(adventureId);
       setLiveRecordingAdventureId(state.liveRecordingAdventureId);
       setLiveRecording(state.liveRecording);
+      setAdventureRecordings(state.recordings);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to upload recording.');
     }
@@ -1011,6 +1061,43 @@ export default function ChronicleTab({
                                   </Tooltip>
                                 )}
                               </Stack>
+
+                              {adventureRecordings.length > 0 && (
+                                <Box sx={{ mt: 2 }}>
+                                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                    Recorded audio files
+                                  </Typography>
+                                  <Stack spacing={1}>
+                                    {adventureRecordings.map(recording => (
+                                      <Box
+                                        key={recording.id}
+                                        sx={{
+                                          border: '1px solid',
+                                          borderColor: 'divider',
+                                          borderRadius: 1,
+                                          p: 1,
+                                        }}
+                                      >
+                                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }} justifyContent="space-between">
+                                          <Typography variant="body2">
+                                            {recordingSourceLabel(recording.source)} · {recordingStatusLabel(recording.status)} ·{' '}
+                                            {formatRecordingTimeRange(recording.startedAt, recording.endedAt)}
+                                          </Typography>
+                                        </Stack>
+                                        {recording.audioUrl ? (
+                                          <Box component="audio" controls src={recording.audioUrl} sx={{ width: '100%', mt: 0.5 }} />
+                                        ) : (
+                                          <Typography variant="caption" color="text.secondary">
+                                            {recording.status === 'AWAITING_ASR'
+                                              ? 'Audio stored — waiting for the ASR service to become reachable to transcribe it.'
+                                              : 'Audio not available yet.'}
+                                          </Typography>
+                                        )}
+                                      </Box>
+                                    ))}
+                                  </Stack>
+                                </Box>
+                              )}
 
                               <Box sx={{ mt: 2 }}>
                                 <TranscriptPanel

@@ -5,6 +5,7 @@ import de.urr4.rp.roleplayer.domain.model.Recording;
 import de.urr4.rp.roleplayer.domain.model.RecordingKeyFactory;
 import de.urr4.rp.roleplayer.domain.model.RecordingStatus;
 import de.urr4.rp.roleplayer.domain.model.TranscriptSegment;
+import de.urr4.rp.roleplayer.domain.port.out.AsrUnavailableException;
 import de.urr4.rp.roleplayer.domain.port.out.AudioStore;
 import de.urr4.rp.roleplayer.domain.port.out.RecordingRepository;
 import de.urr4.rp.roleplayer.domain.port.out.TranscriptSegmentRepository;
@@ -58,8 +59,18 @@ class RecordingProcessingService {
 
     @Async("recordingTaskExecutor")
     public void processUpload(Recording recording, byte[] audioBytes, String contentType) {
+        String audioObjectKey;
         try {
-            String audioObjectKey = audioStore.store(recording.audioObjectKey(), audioBytes, normalizedContentType(contentType));
+            audioObjectKey = audioStore.store(recording.audioObjectKey(), audioBytes, normalizedContentType(contentType));
+        } catch (Exception e) {
+            log.error("Failed to store uploaded recording audio {}", recording.id(), e);
+            recordingRepository.save(new Recording(recording.id(), recording.chronicleId(), recording.adventureId(), recording.source(),
+                    RecordingStatus.FAILED, recording.startedAt(), Instant.now(), recording.audioObjectKey(),
+                    recording.transcriptObjectKey()));
+            throw new IllegalStateException("Failed to store uploaded recording audio " + recording.id(), e);
+        }
+
+        try {
             List<TranscriptSegment> segments = transcriptionClient.transcribe(recording.id(), audioBytes, "de", true)
                     .stream()
                     .map(transcriptSegmentRepository::save)
@@ -70,14 +81,53 @@ class RecordingProcessingService {
 
             recordingRepository.save(new Recording(recording.id(), recording.chronicleId(), recording.adventureId(), recording.source(),
                     RecordingStatus.DONE, recording.startedAt(), Instant.now(), audioObjectKey, transcriptObjectKey));
+        } catch (AsrUnavailableException e) {
+            // Audio is already safely stored in MinIO; leave the recording in
+            // AWAITING_ASR so RecordingRetryScheduler picks it up once the
+            // WhisperX host is reachable again - no data is lost.
+            log.warn("ASR service unreachable while processing uploaded recording {}; will retry automatically",
+                    recording.id(), e);
+            recordingRepository.save(new Recording(recording.id(), recording.chronicleId(), recording.adventureId(), recording.source(),
+                    RecordingStatus.AWAITING_ASR, recording.startedAt(), recording.endedAt(), audioObjectKey,
+                    recording.transcriptObjectKey()));
         } catch (Exception e) {
             log.error("Failed to process uploaded recording {}", recording.id(), e);
             // Persist FAILED so polling clients can observe terminal state even when
             // the async transcription job throws.
             recordingRepository.save(new Recording(recording.id(), recording.chronicleId(), recording.adventureId(), recording.source(),
-                    RecordingStatus.FAILED, recording.startedAt(), Instant.now(), recording.audioObjectKey(),
+                    RecordingStatus.FAILED, recording.startedAt(), Instant.now(), audioObjectKey,
                     recording.transcriptObjectKey()));
             throw new IllegalStateException("Failed to process uploaded recording " + recording.id(), e);
+        }
+    }
+
+    /**
+     * Retries transcription for an upload that previously failed because the
+     * ASR service was unreachable. The audio is re-fetched from MinIO since
+     * the original bytes are not kept in memory.
+     */
+    @Async("recordingTaskExecutor")
+    public void retryUpload(Recording recording, byte[] audioBytes) {
+        try {
+            List<TranscriptSegment> segments = transcriptionClient.transcribe(recording.id(), audioBytes, "de", true)
+                    .stream()
+                    .map(transcriptSegmentRepository::save)
+                    .peek(segment -> transcriptEventPublisher.publish(recording.adventureId(), segment))
+                    .toList();
+            String transcriptObjectKey = transcriptStore.store(recording.transcriptObjectKey(),
+                    objectMapper.writeValueAsBytes(segments));
+
+            recordingRepository.save(new Recording(recording.id(), recording.chronicleId(), recording.adventureId(), recording.source(),
+                    RecordingStatus.DONE, recording.startedAt(), Instant.now(), recording.audioObjectKey(), transcriptObjectKey));
+            log.info("Successfully retried ASR transcription for recording {}", recording.id());
+        } catch (AsrUnavailableException e) {
+            log.debug("ASR service still unreachable while retrying recording {}", recording.id());
+            // stays in AWAITING_ASR, will be retried again on the next scheduler tick
+        } catch (Exception e) {
+            log.error("Failed to retry transcription for recording {}", recording.id(), e);
+            recordingRepository.save(new Recording(recording.id(), recording.chronicleId(), recording.adventureId(), recording.source(),
+                    RecordingStatus.FAILED, recording.startedAt(), Instant.now(), recording.audioObjectKey(),
+                    recording.transcriptObjectKey()));
         }
     }
 

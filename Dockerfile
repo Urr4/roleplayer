@@ -36,8 +36,13 @@ RUN groupadd -r roleplayer && useradd -r -g roleplayer roleplayer
 # libopus0 provides the native Opus codec JDA's voice support (club.minnced:opus-java)
 # falls back to via JNA on architectures (like this image's arm64/Raspberry Pi target)
 # for which opus-java ships no bundled native binary — see docs/discord-bot-setup.md.
+# ffmpeg is used to remux microphone recordings (see WebmRemuxer.java) — browsers'
+# MediaRecorder emits a live recording as a series of independent WebM chunks, and
+# naively concatenating their raw bytes produces a file whose duration/seek
+# metadata only covers the first chunk (shows 0:00/0:00 and isn't seekable when
+# played back) even though the underlying audio/transcription is unaffected.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libopus0 && \
+    apt-get install -y --no-install-recommends libopus0 ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -49,4 +54,12 @@ USER roleplayer
 ENV PORT=3002
 EXPOSE 3002
 
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+# -Djava.net.preferIPv4Stack=true: JDA's Discord voice UDP handshake
+# (external IP/port discovery) can silently fail/time out when the JVM
+# prefers IPv6 sockets on a network where Discord's voice UDP relay only
+# resolves reliably over IPv4 — this manifests as the bot joining a voice
+# channel and being disconnected almost immediately with
+# "ERROR_LOST_CONNECTION"/"The Discord voice connection was lost
+# unexpectedly", even though text/REST calls (e.g. sending chat messages)
+# work fine since those go over TCP/HTTPS. Forcing IPv4 is the standard fix.
+ENTRYPOINT ["java", "-Djava.net.preferIPv4Stack=true", "-jar", "/app/app.jar"]

@@ -556,7 +556,17 @@ public class LiveRecordingBufferManager {
         }
 
         private byte[] prepareStoredAudio(byte[] fullBufferBytes) {
-            return storedAudioRequiresWavHeader ? WavFileWriter.pcm16Stereo48kHz(fullBufferBytes) : fullBufferBytes;
+            if (storedAudioRequiresWavHeader) {
+                return WavFileWriter.pcm16Stereo48kHz(fullBufferBytes);
+            }
+            // Microphone recordings are stored as concatenated MediaRecorder
+            // WebM chunks (see startLiveRecording/MICROPHONE_RECORDING_EXTENSION)
+            // - remux them into a single well-formed WebM container so
+            // duration/seeking work in the browser's audio player.
+            if ("webm".equalsIgnoreCase(fileExtension)) {
+                return WebmRemuxer.fixDuration(fullBufferBytes);
+            }
+            return fullBufferBytes;
         }
 
         private Path userBufferPath(String discordUserId, Path baseDirectory) {

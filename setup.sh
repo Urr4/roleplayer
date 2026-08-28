@@ -11,14 +11,16 @@
 # Options:
 #   ./setup.sh --wipe-db     Delete the SQLite database (warning: all sessions gone!)
 #   ./setup.sh --wipe-minio  Delete all MinIO data (warning: all PDFs gone!)
+#   ./setup.sh --wipe-tls    Regenerate the self-signed TLS certificate
 #
 # What this script does:
 #   1. Install packages (docker, nfs-common) if missing
 #   2. Mount the NFS share if not already mounted
 #   3. Create the two NAS data directories and set permissions
-#   4. Initialize the Docker Swarm if not already active
-#   5. Build the image (ARM64 for Raspberry Pi)
-#   6. Deploy the stack
+#   4. Generate a self-signed TLS certificate (for browser microphone access)
+#   5. Initialize the Docker Swarm if not already active
+#   6. Build the image (ARM64 for Raspberry Pi)
+#   7. Deploy the stack
 
 set -euo pipefail
 
@@ -34,6 +36,10 @@ STACK="roleplayer"
 # MinIO credentials — override as needed
 MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-roleplayer}"
 MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-roleplayer123}"
+
+# Hostname/IP the Pi is reachable under on the LAN — becomes a Subject
+# Alternative Name in the self-signed TLS certificate (see setup_tls()).
+TLS_HOSTNAME="${TLS_HOSTNAME:-pi1}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -138,7 +144,66 @@ setup_directories() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. Build the image
+# 4. Generate a self-signed TLS certificate
+# ─────────────────────────────────────────────────────────────────────────────
+# Browser microphone access (getUserMedia, used for the in-browser recording
+# feature) only works over a "secure context" — plain http://pi1:3002 doesn't
+# qualify, no matter what permissions are granted. The app therefore also
+# starts an HTTPS listener (port 3502) whenever a certificate is present here.
+# On first visit to https://pi1:3502 the browser shows a one-time self-signed
+# certificate warning — accept it ("Advanced" -> "Proceed anyway"), then the
+# microphone works.
+setup_tls() {
+  local tls_dir="${DATA_ROOT}/roleplayer/tls"
+  local cert="${tls_dir}/cert.pem"
+  local key="${tls_dir}/key.pem"
+
+  sudo mkdir -p "${tls_dir}"
+  # Same reasoning as the data directories: Synology root_squash maps the
+  # container's root user to an unprivileged anonymous user, so the directory
+  # itself (not just the files) must be world-readable/searchable, otherwise
+  # the container can't access the certificate after a restart ("No TLS
+  # certificate found" despite the file existing).
+  sudo chmod 777 "${tls_dir}"
+
+  if [[ -f "${cert}" && -f "${key}" ]]; then
+    sudo chmod 644 "${cert}" "${key}"
+    ok "TLS certificate already present (${cert})."
+    return
+  fi
+
+  info "Generating self-signed TLS certificate for '${TLS_HOSTNAME}'…"
+
+  local lan_ip
+  lan_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  local san="DNS:${TLS_HOSTNAME},DNS:localhost,IP:127.0.0.1"
+  [[ -n "${lan_ip}" ]] && san="${san},IP:${lan_ip}"
+
+  sudo openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
+    -keyout "${key}" -out "${cert}" \
+    -subj "/CN=${TLS_HOSTNAME}" \
+    -addext "subjectAltName=${san}" \
+    >/dev/null 2>&1
+
+  sudo chmod 644 "${cert}" "${key}"
+
+  ok "TLS certificate created: ${cert}"
+}
+
+wipe_tls() {
+  local tls_dir="${DATA_ROOT}/roleplayer/tls"
+  warn "Deleting existing TLS certificate at ${tls_dir}…"
+  sudo rm -f "${tls_dir}/cert.pem" "${tls_dir}/key.pem"
+  setup_tls
+  if docker service ls --format '{{.Name}}' | grep -q "${STACK}_app"; then
+    info "Restarting app service…"
+    docker service update --force "${STACK}_app"
+    ok "Service restarted."
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. Build the image
 # ─────────────────────────────────────────────────────────────────────────────
 build_image() {
   info "Building ${IMAGE} for linux/arm64 (can take ~5–10 min on the Pi)…"
@@ -147,7 +212,7 @@ build_image() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. Deploy the stack
+# 6. Deploy the stack
 # ─────────────────────────────────────────────────────────────────────────────
 deploy_stack() {
   info "Deploying Docker Swarm stack '${STACK}'…"
@@ -208,7 +273,11 @@ print_next_steps() {
   echo "════════════════════════════════════════════════════════════════════"
   echo ""
   echo "  App reachable at:"
-  echo "    http://pi1:3002"
+  echo "    http://pi1:3002   (no microphone access - browsers block"
+  echo "                       getUserMedia outside HTTPS/localhost)"
+  echo "    https://pi1:3502  (self-signed cert, needed for microphone"
+  echo "                       recording; accept the one-time browser"
+  echo "                       certificate warning)"
   echo ""
   echo "  Useful commands:"
   echo "    docker stack ps ${STACK}              # Service status"
@@ -225,6 +294,7 @@ main() {
   case "${1:-}" in
     --wipe-db)    wipe_db;    exit 0 ;;
     --wipe-minio) wipe_minio; exit 0 ;;
+    --wipe-tls)   wipe_tls;   exit 0 ;;
   esac
 
   echo ""
@@ -240,6 +310,7 @@ main() {
   install_packages
   setup_nfs
   setup_directories
+  setup_tls
   build_image
   deploy_stack
   print_next_steps

@@ -7,6 +7,7 @@ import de.urr4.rp.roleplayer.domain.model.RecordingSource;
 import de.urr4.rp.roleplayer.web.dto.RecordingDto;
 import de.urr4.rp.roleplayer.web.dto.StartRecordingRequest;
 import de.urr4.rp.roleplayer.web.dto.TranscriptSegmentDto;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,9 +18,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.net.URLConnection;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -36,9 +39,18 @@ public class RecordingController {
     }
 
     private RecordingDto toDto(Recording recording) {
+        // Proxy audio playback through this app's own (HTTPS) endpoint rather
+        // than handing the browser a raw MinIO presigned URL: the app runs
+        // behind HTTPS on 3502, but MinIO is only reachable over plain HTTP
+        // on 9004, so a direct MinIO URL is "mixed content" and gets silently
+        // blocked by the browser for <audio>/<video> elements - this is what
+        // caused every recording to show as 0:00/0:00 and refuse to play.
         String audioUrl = recording.audioObjectKey() == null || recording.audioObjectKey().isBlank()
                 ? null
-                : audioStore.presignedUrl(recording.audioObjectKey());
+                : ServletUriComponentsBuilder.fromCurrentContextPath()
+                        .path("/api/adventures/{adventureId}/recordings/{recordingId}/audio")
+                        .buildAndExpand(recording.adventureId(), recording.id())
+                        .toUriString();
         return RecordingDto.from(recording, audioUrl);
     }
 
@@ -122,6 +134,44 @@ public class RecordingController {
         } catch (IllegalStateException e) {
             return ResponseEntity.status(409).build();
         }
+    }
+
+    @GetMapping("/{recordingId}/audio")
+    public ResponseEntity<ByteArrayResource> audio(@PathVariable String adventureId, @PathVariable String recordingId) {
+        try {
+            Recording recording = recordingService.getRecording(recordingId);
+            if (recording.audioObjectKey() == null || recording.audioObjectKey().isBlank()) {
+                return ResponseEntity.notFound().build();
+            }
+            byte[] data = audioStore.fetch(recording.audioObjectKey());
+            String contentType = guessContentType(recording.audioObjectKey());
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(contentType))
+                    .contentLength(data.length)
+                    .body(new ByteArrayResource(data));
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    private static String guessContentType(String objectKey) {
+        String guessed = URLConnection.guessContentTypeFromName(objectKey);
+        if (guessed != null) {
+            return guessed;
+        }
+        if (objectKey.endsWith(".webm")) {
+            return "audio/webm";
+        }
+        if (objectKey.endsWith(".wav")) {
+            return "audio/wav";
+        }
+        if (objectKey.endsWith(".mp3")) {
+            return "audio/mpeg";
+        }
+        if (objectKey.endsWith(".m4a")) {
+            return "audio/mp4";
+        }
+        return "application/octet-stream";
     }
 
     @GetMapping("/{recordingId}/transcript")

@@ -197,6 +197,19 @@ public class LiveRecordingBufferManager {
         if (buffer != null) {
             synchronized (buffer) {
                 buffer.disableCapture();
+                // Flush whatever audio was already captured (and kick off
+                // transcription for it) before discarding the buffer -
+                // otherwise a connection drop (the very reason we usually end
+                // up here) silently throws away already-recorded audio with
+                // no chance of ever being stored or transcribed, even once
+                // the ASR service is reachable again.
+                if (buffer.hasBufferedAudio() && recording.status() == RecordingStatus.RECORDING) {
+                    try {
+                        recording = flushLocked(recording, buffer).recording();
+                    } catch (RuntimeException e) {
+                        log.warn("Failed to flush buffered audio while failing recording {}", recordingId, e);
+                    }
+                }
                 deleteBufferArtifacts(buffer);
             }
         }
@@ -482,6 +495,14 @@ public class LiveRecordingBufferManager {
 
         private Path audioBufferPath() {
             return audioBufferPath;
+        }
+
+        private boolean hasBufferedAudio() {
+            try {
+                return Files.exists(audioBufferPath) && Files.size(audioBufferPath) > 0;
+            } catch (IOException e) {
+                return false;
+            }
         }
 
         private int nextChunkIndex() {

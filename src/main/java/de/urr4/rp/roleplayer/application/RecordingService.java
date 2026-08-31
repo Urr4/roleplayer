@@ -168,6 +168,11 @@ public class RecordingService {
         return recordingRepository.findByAdventureId(adventureId);
     }
 
+    public Recording getRecording(String recordingId) {
+        return recordingRepository.findById(recordingId)
+                .orElseThrow(() -> new NoSuchElementException("Recording not found: " + recordingId));
+    }
+
     public List<TranscriptSegment> getTranscript(String recordingId) {
         return transcriptSegmentRepository.findByRecordingIdOrderByStartMsAsc(recordingId);
     }

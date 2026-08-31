@@ -7,27 +7,27 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 
 @Entity
-@Table(name = "chronicles")
-public class ChronicleEntity {
+@Table(name = "worlds")
+public class WorldEntity {
 
     @Id
     private String id;
     private String name;
+    private String slug;
     private Instant createdAt;
-    private String worldId;
 
-    protected ChronicleEntity() {
+    protected WorldEntity() {
     }
 
-    public ChronicleEntity(String id, String name, Instant createdAt, String worldId) {
+    public WorldEntity(String id, String name, String slug, Instant createdAt) {
         this.id = id;
         this.name = name;
+        this.slug = slug;
         this.createdAt = createdAt;
-        this.worldId = worldId;
     }
 
     public String getId() { return id; }
     public String getName() { return name; }
+    public String getSlug() { return slug; }
     public Instant getCreatedAt() { return createdAt; }
-    public String getWorldId() { return worldId; }
 }

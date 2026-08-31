@@ -241,6 +241,50 @@ public class LiveRecordingBufferManager {
         }
     }
 
+    /**
+     * Transcribes and posts newly-recorded Discord speech to the voice
+     * channel's text chat on a short, fixed cadence (independent from the
+     * 5-minute {@link #FLUSH_INTERVAL} used to upload the audio file to
+     * S3/MinIO - that cadence intentionally stays slow, this one must be
+     * fast so players can follow along live). Cheap no-op when there is
+     * nothing new to transcribe for a given recording.
+     */
+    public void refreshDiscordLiveTranscriptsDue() {
+        for (Map.Entry<String, ManagedRecordingBuffer> entry : buffers.entrySet()) {
+            ManagedRecordingBuffer buffer = entry.getValue();
+            if (!buffer.storedAudioRequiresWavHeader() || buffer.discordChannelId() == null
+                    || buffer.discordChannelId().isBlank()) {
+                continue;
+            }
+            synchronized (buffer) {
+                if (!buffer.isCaptureEnabled()) {
+                    continue;
+                }
+                Recording recording;
+                try {
+                    recording = requireRecording(entry.getKey());
+                } catch (NoSuchElementException e) {
+                    continue;
+                }
+                if (recording.status() != RecordingStatus.RECORDING) {
+                    continue;
+                }
+                Chronicle chronicle;
+                try {
+                    chronicle = chronicleRepository.findById(recording.chronicleId())
+                            .orElseThrow(() -> new NoSuchElementException("Chronicle not found: " + recording.chronicleId()));
+                } catch (NoSuchElementException e) {
+                    continue;
+                }
+                try {
+                    transcribeAndPostDiscordDeltas(recording, chronicle.name(), buffer);
+                } catch (RuntimeException e) {
+                    log.warn("Failed to post live Discord transcript update for recording {}", entry.getKey(), e);
+                }
+            }
+        }
+    }
+
     @PreDestroy
     void cleanupBuffers() {
         buffers.values().forEach(this::deleteBufferArtifacts);
@@ -327,22 +371,17 @@ public class LiveRecordingBufferManager {
             }
         }
 
-        long approximateOffsetMs = buffer.lastTranscribedApproximateMs();
-        long approximateDurationMs = buffer.approximateRecordedDurationMsAt(flushedAt);
-
         if (buffer.storedAudioRequiresWavHeader()) {
-            List<SpeakerAudioDelta> speakerDeltas = buffer.collectSpeakerDeltas(recording.id());
-            recordingProcessingService.processDiscordLiveDelta(updatedRecording, chronicle.name(), speakerDeltas,
-                    approximateOffsetMs, flushedAt, buffer.language(), buffer.discordChannelId(),
-                    buffer.writeTranscriptToChat(), buffer, () -> {
-                        if (fullBufferBytes.length > buffer.lastTranscribedOffset()) {
-                            buffer.advanceTranscriptionBoundary(fullBufferBytes.length, approximateDurationMs);
-                        }
-                        if (!speakerDeltas.isEmpty()) {
-                            buffer.advanceSpeakerTranscriptionBoundaries();
-                        }
-                    });
+            // Discord: transcription/chat-posting runs independently on its own
+            // fast cadence (see refreshDiscordLiveTranscriptsDue) - this flush
+            // only needs to (re)upload the accumulated audio to S3/MinIO, but
+            // we also invoke it here so pause/stop/fail and the slower
+            // 5-minute cycle are guaranteed to flush any final audio too,
+            // even if the fast scheduler hasn't ticked yet.
+            transcribeAndPostDiscordDeltas(updatedRecording, chronicle.name(), buffer);
         } else {
+            long approximateOffsetMs = buffer.lastTranscribedApproximateMs();
+            long approximateDurationMs = buffer.approximateRecordedDurationMsAt(flushedAt);
             long deltaStart = buffer.lastTranscribedOffset();
             if (deltaStart < 0 || deltaStart > fullBufferBytes.length) {
                 throw new IllegalStateException("Invalid transcription offset for recording " + recording.id());
@@ -358,6 +397,22 @@ public class LiveRecordingBufferManager {
 
         buffer.markFlushedAt(flushedAt);
         return new FlushResult(updatedRecording, flushedAt);
+    }
+
+    private void transcribeAndPostDiscordDeltas(Recording recording, String sessionName, ManagedRecordingBuffer buffer) {
+        List<SpeakerAudioDelta> speakerDeltas = buffer.collectSpeakerDeltas(recording.id());
+        if (speakerDeltas.isEmpty()) {
+            return;
+        }
+        long approximateOffsetMs = buffer.lastTranscribedApproximateMs();
+        Instant now = Instant.now(clock);
+        long approximateDurationMs = buffer.approximateRecordedDurationMsAt(now);
+        recordingProcessingService.processDiscordLiveDelta(recording, sessionName, speakerDeltas,
+                approximateOffsetMs, now, buffer.language(), buffer.discordChannelId(),
+                buffer.writeTranscriptToChat(), buffer, () -> {
+                    buffer.advanceTranscriptionBoundary(buffer.combinedBufferSizeBytes(), approximateDurationMs);
+                    buffer.advanceSpeakerTranscriptionBoundaries();
+                });
     }
 
     private Recording saveRecording(Recording recording, RecordingStatus status, Instant endedAt) {
@@ -426,6 +481,31 @@ public class LiveRecordingBufferManager {
             return Files.exists(bufferPath) ? Files.readAllBytes(bufferPath) : new byte[0];
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to read live recording buffer for " + recordingId, e);
+        }
+    }
+
+    private static byte[] readBytesFrom(Path bufferPath, long offset, String recordingId) {
+        try {
+            if (!Files.exists(bufferPath)) {
+                return new byte[0];
+            }
+            long size = Files.size(bufferPath);
+            if (offset < 0 || offset > size) {
+                throw new IllegalStateException("Invalid Discord transcription offset for recording " + recordingId);
+            }
+            if (offset == size) {
+                return new byte[0];
+            }
+            try (java.nio.channels.SeekableByteChannel channel = Files.newByteChannel(bufferPath, StandardOpenOption.READ)) {
+                channel.position(offset);
+                java.nio.ByteBuffer target = java.nio.ByteBuffer.allocate(Math.toIntExact(size - offset));
+                while (target.hasRemaining() && channel.read(target) >= 0) {
+                    // keep reading until the buffer is full or EOF
+                }
+                return target.array();
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read live recording buffer delta for " + recordingId, e);
         }
     }
 
@@ -643,19 +723,28 @@ public class LiveRecordingBufferManager {
         private List<SpeakerAudioDelta> collectSpeakerDeltas(String recordingId) {
             List<SpeakerAudioDelta> deltas = new ArrayList<>();
             for (Map.Entry<String, DiscordUserBuffer> entry : discordUserBuffers.entrySet()) {
-                byte[] allUserBytes = readAllBytes(entry.getValue().bufferPath(), recordingId);
-                long lastOffset = entry.getValue().lastTranscribedOffset();
-                if (lastOffset < 0 || lastOffset > allUserBytes.length) {
-                    throw new IllegalStateException("Invalid Discord transcription offset for recording " + recordingId);
-                }
-                byte[] deltaPcmBytes = Arrays.copyOfRange(allUserBytes, Math.toIntExact(lastOffset), allUserBytes.length);
+                DiscordUserBuffer userBuffer = entry.getValue();
+                // Read only the newly-arrived tail bytes rather than the
+                // whole per-user buffer file: this is now called on a fast
+                // (few-second) cadence for the live Discord chat transcript,
+                // so re-reading an ever-growing file in full each tick would
+                // get slower and more wasteful the longer a session runs.
+                byte[] deltaPcmBytes = readBytesFrom(userBuffer.bufferPath(), userBuffer.lastTranscribedOffset(), recordingId);
                 if (deltaPcmBytes.length == 0) {
                     continue;
                 }
-                deltas.add(new SpeakerAudioDelta(entry.getKey(), entry.getValue().speakerLabel(),
+                deltas.add(new SpeakerAudioDelta(entry.getKey(), userBuffer.speakerLabel(),
                         WavFileWriter.pcm16Stereo48kHz(deltaPcmBytes)));
             }
             return deltas;
+        }
+
+        private long combinedBufferSizeBytes() {
+            try {
+                return Files.exists(audioBufferPath) ? Files.size(audioBufferPath) : 0L;
+            } catch (IOException e) {
+                throw new UncheckedIOException("Failed to inspect live recording buffer " + audioBufferPath, e);
+            }
         }
 
         private List<Path> allBufferPaths() {

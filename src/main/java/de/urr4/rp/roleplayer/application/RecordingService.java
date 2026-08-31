@@ -15,6 +15,7 @@ import de.urr4.rp.roleplayer.domain.port.out.TranscriptSegmentRepository;
 import de.urr4.rp.roleplayer.domain.port.out.TranscriptStore;
 import de.urr4.rp.roleplayer.domain.port.out.VoiceChannelCapture;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Comparator;
@@ -203,6 +204,7 @@ public class RecordingService {
                 .toList();
     }
 
+    @Transactional
     public void deleteRecording(String recordingId) {
         Recording recording = recordingRepository.findById(recordingId)
                 .orElseThrow(() -> new NoSuchElementException("Recording not found: " + recordingId));
@@ -214,6 +216,7 @@ public class RecordingService {
         recordingRepository.deleteById(recordingId);
     }
 
+    @Transactional
     public Recording deleteTranscript(String recordingId) {
         Recording recording = recordingRepository.findById(recordingId)
                 .orElseThrow(() -> new NoSuchElementException("Recording not found: " + recordingId));
@@ -235,6 +238,7 @@ public class RecordingService {
      * belongs to the given adventure. Used when an Adventure or its owning
      * Chronicle is deleted.
      */
+    @Transactional
     void deleteRecordingsByAdventureId(String adventureId) {
         for (Recording recording : recordingRepository.findByAdventureId(adventureId)) {
             if (LIVE_STATUSES.contains(recording.status())) {

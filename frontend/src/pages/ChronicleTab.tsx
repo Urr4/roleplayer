@@ -41,13 +41,14 @@ import StopIcon from '@mui/icons-material/Stop';
 import StopCircleIcon from '@mui/icons-material/StopCircle';
 import ExploreIcon from '@mui/icons-material/Explore';
 import TranscriptPanel from './TranscriptPanel';
-import type { AdventureCharacterDto, AdventureDto, CharacterDto, ChronicleDto, DiscordGuildDto, DiscordVoiceChannelDto, PlayerDto, RecordingDto, TranscriptSegmentDto } from '../types';
+import type { AdventureCharacterDto, AdventureDto, CharacterDto, ChronicleDto, DiscordGuildDto, DiscordVoiceChannelDto, PlayerDto, RecordingDto, TranscriptSegmentDto, WorldDto } from '../types';
 import {
   addAdventureCharacter,
   appendRecordingChunk,
   createAdventure,
   createCharacter,
   createChronicle,
+  createWorld,
   deleteAdventure,
   deleteCharacter,
   deleteChronicle,
@@ -63,6 +64,7 @@ import {
   getPlayers,
   getRecordings,
   getRecordingTranscript,
+  getWorlds,
   importCharacterIntoChronicle,
   pauseRecording,
   removeAdventureCharacter,
@@ -136,6 +138,8 @@ export default function ChronicleTab({
   onActiveAdventureChanged,
 }: Props) {
   const [newChronicleName, setNewChronicleName] = useState('');
+  const [worlds, setWorlds] = useState<WorldDto[]>([]);
+  const [selectedWorld, setSelectedWorld] = useState<WorldDto | string | null>(null);
 
   const [allPlayers, setAllPlayers] = useState<PlayerDto[]>([]);
   const [allCharacters, setAllCharacters] = useState<CharacterDto[]>([]);
@@ -282,6 +286,7 @@ export default function ChronicleTab({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshRoster().catch(err => setError(err instanceof Error ? err.message : 'Unable to load players and characters.'));
+    void getWorlds().then(setWorlds).catch(err => setError(err instanceof Error ? err.message : 'Welten konnten nicht geladen werden.'));
   }, [refreshRoster]);
 
   useEffect(() => {
@@ -379,14 +384,24 @@ export default function ChronicleTab({
 
   const handleCreateChronicle = async () => {
     const name = newChronicleName.trim();
-    if (!name) return;
+    const worldInput = typeof selectedWorld === 'string' ? selectedWorld.trim() : selectedWorld?.name?.trim();
+    if (!name || !worldInput) return;
     try {
-      const chronicle = await createChronicle(name);
+      let worldId = typeof selectedWorld === 'string' || !selectedWorld
+        ? (await createWorld(worldInput)).id
+        : selectedWorld.id;
+      if (typeof selectedWorld !== 'string') {
+        const existing = worlds.find(world => world.name.toLowerCase() === worldInput.toLowerCase());
+        if (existing) worldId = existing.id;
+      }
+      const chronicle = await createChronicle(name, worldId);
       setNewChronicleName('');
+      setSelectedWorld(null);
+      setWorlds(await getWorlds());
       onSelectChronicle(chronicle.id);
       onChroniclesChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to create chronicle.');
+      setError(err instanceof Error ? err.message : 'Chronik konnte nicht erstellt werden.');
     }
   };
 
@@ -764,17 +779,28 @@ export default function ChronicleTab({
             <CardContent>
               <Stack spacing={2}>
                 <Typography variant="h5">Chronicles</Typography>
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                <Stack spacing={1}>
                   <TextField
-                    label="New chronicle name"
+                    label="Name der Chronik"
                     size="small"
                     fullWidth
                     value={newChronicleName}
                     onChange={event => setNewChronicleName(event.target.value)}
                     onKeyDown={event => event.key === 'Enter' && void handleCreateChronicle()}
                   />
-                  <Button variant="contained" startIcon={<AddIcon />} onClick={() => void handleCreateChronicle()}>
-                    Create
+                  <Autocomplete
+                    freeSolo
+                    options={worlds}
+                    getOptionLabel={option => typeof option === 'string' ? option : option.name}
+                    value={selectedWorld}
+                    onChange={(_, value) => setSelectedWorld(value)}
+                    onInputChange={(_, value, reason) => {
+                      if (reason === 'input') setSelectedWorld(value);
+                    }}
+                    renderInput={params => <TextField {...params} label="Welt auswählen oder neu anlegen" size="small" />}
+                  />
+                  <Button variant="contained" startIcon={<AddIcon />} onClick={() => void handleCreateChronicle()} disabled={!newChronicleName.trim() || !(typeof selectedWorld === 'string' ? selectedWorld.trim() : selectedWorld?.name)}>
+                    Erstellen
                   </Button>
                 </Stack>
 
@@ -805,7 +831,7 @@ export default function ChronicleTab({
                         onClick={() => onSelectChronicle(chronicle.id)}
                         sx={{ borderRadius: 2 }}
                       >
-                        <ListItemText primary={chronicle.name} secondary={new Date(chronicle.createdAt).toLocaleString()} />
+                        <ListItemText primary={chronicle.name} secondary={`${new Date(chronicle.createdAt).toLocaleString()}${chronicle.worldName ? ` · Welt: ${chronicle.worldName}` : ''}`} />
                       </ListItemButton>
                     </ListItem>
                   ))}
@@ -1067,6 +1093,15 @@ export default function ChronicleTab({
                                           Started {new Date(adventure.startedAt).toLocaleString()}
                                           {adventure.endedAt && ` – Ended ${new Date(adventure.endedAt).toLocaleString()}`}
                                         </Typography>
+                                      )}
+                                      {adventure.worldExtractionStatus === 'PENDING' && (
+                                        <Typography variant="caption" color="text.secondary" component="span">Extrahiere Weltfakten…</Typography>
+                                      )}
+                                      {adventure.worldExtractionStatus === 'DONE' && (
+                                        <Typography variant="caption" color="success.main" component="span">Weltfakten aktualisiert ✓{activeChronicle?.worldSlug ? ` · https://urr4.github.io/roleplaying-worlds/worlds/${activeChronicle.worldSlug}/` : ''}</Typography>
+                                      )}
+                                      {adventure.worldExtractionStatus === 'FAILED' && adventure.worldExtractionError && (
+                                        <Alert severity="error" sx={{ mt: 0.5 }}>{adventure.worldExtractionError}</Alert>
                                       )}
                                     </Stack>
                                   }

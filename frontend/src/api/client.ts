@@ -5,6 +5,7 @@ import type {
   AttributePools,
   CharacterDto,
   ChronicleDto,
+  WorldDto,
   DiscordGuildDto,
   DiscordVoiceChannelDto,
   NpcDto,
@@ -18,10 +19,12 @@ const api = axios.create({ baseURL: '/api' });
 
 // ── Chronicles ────────────────────────────────────────────────────────────────
 export const getChronicles = () => api.get<ChronicleDto[]>('/chronicles').then(r => r.data);
-export const createChronicle = (name: string) => api.post<ChronicleDto>('/chronicles', { name }).then(r => r.data);
+export const createChronicle = (name: string, worldId: string) => api.post<ChronicleDto>('/chronicles', { name, worldId }).then(r => r.data);
 export const getChronicle = (id: string) => api.get<ChronicleDto>(`/chronicles/${id}`).then(r => r.data);
 
 export const deleteChronicle = (id: string) => api.delete(`/chronicles/${id}`);
+export const getWorlds = () => api.get<WorldDto[]>('/worlds').then(r => r.data);
+export const createWorld = (name: string) => api.post<WorldDto>('/worlds', { name }).then(r => r.data);
 
 // ── Adventures ────────────────────────────────────────────────────────────────
 export const getAdventures = (chronicleId: string) =>

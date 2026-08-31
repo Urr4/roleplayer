@@ -2,10 +2,12 @@ package de.urr4.rp.roleplayer.application;
 
 import de.urr4.rp.roleplayer.domain.model.Adventure;
 import de.urr4.rp.roleplayer.domain.model.AdventureStatus;
+import de.urr4.rp.roleplayer.domain.model.WorldExtractionStatus;
 import de.urr4.rp.roleplayer.domain.port.out.AdventureCharacterRepository;
 import de.urr4.rp.roleplayer.domain.port.out.AdventureRepository;
 import de.urr4.rp.roleplayer.domain.port.out.ChronicleRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
@@ -20,21 +22,25 @@ public class AdventureService {
     private final ChronicleRepository chronicleRepository;
     private final AdventureCharacterRepository adventureCharacterRepository;
     private final RecordingService recordingService;
+    private final WorldFactExtractionService worldFactExtractionService;
 
     public AdventureService(AdventureRepository adventureRepository, ChronicleRepository chronicleRepository,
                             AdventureCharacterRepository adventureCharacterRepository,
-                            RecordingService recordingService) {
+                            RecordingService recordingService,
+                            WorldFactExtractionService worldFactExtractionService) {
         this.adventureRepository = adventureRepository;
         this.chronicleRepository = chronicleRepository;
         this.adventureCharacterRepository = adventureCharacterRepository;
         this.recordingService = recordingService;
+        this.worldFactExtractionService = worldFactExtractionService;
     }
 
     public Adventure createAdventure(String chronicleId, String name) {
         chronicleRepository.findById(chronicleId)
                 .orElseThrow(() -> new NoSuchElementException("Chronicle not found: " + chronicleId));
         Adventure adventure = new Adventure(
-                UUID.randomUUID().toString(), chronicleId, name, AdventureStatus.PLANNED, Instant.now(), null, null);
+                UUID.randomUUID().toString(), chronicleId, name, AdventureStatus.PLANNED, Instant.now(), null, null,
+                WorldExtractionStatus.NONE, null);
         return adventureRepository.save(adventure);
     }
 
@@ -68,7 +74,7 @@ public class AdventureService {
         Instant startedAt = adventure.startedAt() == null ? Instant.now() : adventure.startedAt();
         Adventure started = new Adventure(
                 adventure.id(), adventure.chronicleId(), adventure.name(), AdventureStatus.ACTIVE,
-                adventure.createdAt(), startedAt, null);
+                adventure.createdAt(), startedAt, null, adventure.worldExtractionStatus(), adventure.worldExtractionError());
         return adventureRepository.save(started);
     }
 
@@ -77,10 +83,13 @@ public class AdventureService {
                 .orElseThrow(() -> new NoSuchElementException("Adventure not found: " + id));
         Adventure stopped = new Adventure(
                 adventure.id(), adventure.chronicleId(), adventure.name(), AdventureStatus.COMPLETED,
-                adventure.createdAt(), adventure.startedAt(), Instant.now());
-        return adventureRepository.save(stopped);
+                adventure.createdAt(), adventure.startedAt(), Instant.now(), adventure.worldExtractionStatus(), adventure.worldExtractionError());
+        Adventure saved = adventureRepository.save(stopped);
+        worldFactExtractionService.onAdventureStopped(saved);
+        return saved;
     }
 
+    @Transactional
     public void deleteAdventure(String id) {
         adventureRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Adventure not found: " + id));

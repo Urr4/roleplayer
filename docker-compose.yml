@@ -56,6 +56,12 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-roleplayer}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-roleplayer123}
       ASR_URL: ${ASR_URL:-http://Stefans-PC:9090}
+      OLLAMA_URL: ${OLLAMA_URL:-http://Stefans-PC:11434}
+      OLLAMA_WORLDBUILDING_MODEL: ${OLLAMA_WORLDBUILDING_MODEL:-llama3.2}
+      # GITHUB_VAULT_TOKEN via .env auf dem Pi setzen, nicht committen.
+      GITHUB_VAULT_TOKEN: ${GITHUB_VAULT_TOKEN:-}
+      GITHUB_VAULT_REPO: ${GITHUB_VAULT_REPO:-Urr4/roleplaying-worlds}
+      GITHUB_VAULT_BRANCH: ${GITHUB_VAULT_BRANCH:-main}
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
     volumes:
       - sqlite-data:/data

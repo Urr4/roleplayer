@@ -9,7 +9,9 @@ public record Adventure(
         AdventureStatus status,
         Instant createdAt,
         Instant startedAt,
-        Instant endedAt) {
+        Instant endedAt,
+        WorldExtractionStatus worldExtractionStatus,
+        String worldExtractionError) {
 
     public boolean isActive() {
         return status == AdventureStatus.ACTIVE;

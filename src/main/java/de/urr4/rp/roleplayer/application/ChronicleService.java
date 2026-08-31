@@ -7,7 +7,9 @@ import de.urr4.rp.roleplayer.domain.port.out.AdventureRepository;
 import de.urr4.rp.roleplayer.domain.port.out.CharacterRepository;
 import de.urr4.rp.roleplayer.domain.port.out.ChronicleNpcLinkRepository;
 import de.urr4.rp.roleplayer.domain.port.out.ChronicleRepository;
+import de.urr4.rp.roleplayer.domain.port.out.WorldRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
@@ -24,20 +26,25 @@ public class ChronicleService {
     private final CharacterRepository characterRepository;
     private final CharacterService characterService;
     private final ChronicleNpcLinkRepository chronicleNpcLinkRepository;
+    private final WorldRepository worldRepository;
 
     public ChronicleService(ChronicleRepository chronicleRepository, AdventureRepository adventureRepository,
                             AdventureService adventureService, CharacterRepository characterRepository,
-                            CharacterService characterService, ChronicleNpcLinkRepository chronicleNpcLinkRepository) {
+                            CharacterService characterService, ChronicleNpcLinkRepository chronicleNpcLinkRepository,
+                            WorldRepository worldRepository) {
         this.chronicleRepository = chronicleRepository;
         this.adventureRepository = adventureRepository;
         this.adventureService = adventureService;
         this.characterRepository = characterRepository;
         this.characterService = characterService;
         this.chronicleNpcLinkRepository = chronicleNpcLinkRepository;
+        this.worldRepository = worldRepository;
     }
 
-    public Chronicle createChronicle(String name) {
-        Chronicle chronicle = new Chronicle(UUID.randomUUID().toString(), name, Instant.now());
+    public Chronicle createChronicle(String name, String worldId) {
+        worldRepository.findById(worldId)
+                .orElseThrow(() -> new NoSuchElementException("World not found: " + worldId));
+        Chronicle chronicle = new Chronicle(UUID.randomUUID().toString(), name, Instant.now(), worldId);
         return chronicleRepository.save(chronicle);
     }
 
@@ -49,6 +56,7 @@ public class ChronicleService {
         return chronicleRepository.findById(id);
     }
 
+    @Transactional
     public void deleteChronicle(String id) {
         chronicleRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Chronicle not found: " + id));

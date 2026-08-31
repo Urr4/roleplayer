@@ -7,6 +7,7 @@ import de.urr4.rp.roleplayer.domain.port.out.ChronicleRepository;
 import de.urr4.rp.roleplayer.domain.port.out.PdfStore;
 import de.urr4.rp.roleplayer.domain.port.out.PlayerRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
@@ -77,6 +78,7 @@ public class CharacterService {
                 .map(pdfStore::presignedUrl);
     }
 
+    @Transactional
     public void deleteCharacter(String characterId) {
         Character existing = requireCharacter(characterId);
         if (existing.pdfObjectKey() != null && !existing.pdfObjectKey().isBlank()) {

@@ -1,6 +1,7 @@
 package de.urr4.rp.roleplayer.adapter.jpa;
 
 import de.urr4.rp.roleplayer.domain.model.Adventure;
+import de.urr4.rp.roleplayer.domain.model.WorldExtractionStatus;
 import de.urr4.rp.roleplayer.domain.port.out.AdventureRepository;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
@@ -21,7 +22,8 @@ public class JpaAdventureAdapter implements AdventureRepository {
     public Adventure save(Adventure adventure) {
         AdventureEntity saved = repository.save(new AdventureEntity(
                 adventure.id(), adventure.chronicleId(), adventure.name(), adventure.status(),
-                adventure.createdAt(), adventure.startedAt(), adventure.endedAt()));
+                adventure.createdAt(), adventure.startedAt(), adventure.endedAt(),
+                adventure.worldExtractionStatus(), adventure.worldExtractionError()));
         return toDomain(saved);
     }
 
@@ -53,6 +55,8 @@ public class JpaAdventureAdapter implements AdventureRepository {
 
     private static Adventure toDomain(AdventureEntity entity) {
         return new Adventure(entity.getId(), entity.getChronicleId(), entity.getName(), entity.getStatus(),
-                entity.getCreatedAt(), entity.getStartedAt(), entity.getEndedAt());
+                entity.getCreatedAt(), entity.getStartedAt(), entity.getEndedAt(),
+                entity.getWorldExtractionStatus() == null ? WorldExtractionStatus.NONE : entity.getWorldExtractionStatus(),
+                entity.getWorldExtractionError());
     }
 }

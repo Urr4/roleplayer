@@ -20,7 +20,7 @@ public class JpaChronicleAdapter implements ChronicleRepository {
 
     @Override
     public Chronicle save(Chronicle chronicle) {
-        ChronicleEntity saved = repository.save(new ChronicleEntity(chronicle.id(), chronicle.name(), chronicle.createdAt()));
+        ChronicleEntity saved = repository.save(new ChronicleEntity(chronicle.id(), chronicle.name(), chronicle.createdAt(), chronicle.worldId()));
         return toDomain(saved);
     }
 
@@ -40,6 +40,6 @@ public class JpaChronicleAdapter implements ChronicleRepository {
     }
 
     private static Chronicle toDomain(ChronicleEntity entity) {
-        return new Chronicle(entity.getId(), entity.getName(), entity.getCreatedAt());
+        return new Chronicle(entity.getId(), entity.getName(), entity.getCreatedAt(), entity.getWorldId());
     }
 }

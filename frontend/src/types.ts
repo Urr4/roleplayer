@@ -1,7 +1,17 @@
+export interface WorldDto {
+  id: string;
+  name: string;
+  slug: string;
+  createdAt: string;
+}
+
 export interface ChronicleDto {
   id: string;
   name: string;
   createdAt: string;
+  worldId?: string;
+  worldName?: string;
+  worldSlug?: string;
 }
 
 export interface AdventureDto {
@@ -12,6 +22,8 @@ export interface AdventureDto {
   createdAt: string;
   startedAt: string | null;
   endedAt: string | null;
+  worldExtractionStatus?: 'NONE' | 'PENDING' | 'DONE' | 'FAILED';
+  worldExtractionError?: string | null;
 }
 
 export interface PlayerDto {
@@ -53,7 +65,6 @@ export interface AttributePools {
   statuses: NpcStatus[];
 }
 
-// ── Recordings & transcripts ─────────────────────────────────────────────────
 export type RecordingSource = 'UPLOAD' | 'MICROPHONE' | 'DISCORD';
 export type RecordingStatus = 'RECORDING' | 'PAUSED' | 'STOPPED' | 'PROCESSING' | 'AWAITING_ASR' | 'DONE' | 'FAILED';
 
@@ -81,7 +92,6 @@ export interface TranscriptSegmentDto {
   createdAt: string;
 }
 
-// ── Discord bot ───────────────────────────────────────────────────────────────
 export interface DiscordGuildDto {
   id: string;
   name: string;

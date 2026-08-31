@@ -20,5 +20,6 @@ public class JpaCharacterAdapter implements CharacterRepository {
     @Override public List<Character> findAll() { return repository.findAll().stream().map(JpaCharacterAdapter::toDomain).toList(); }
     @Override public List<Character> findByChronicleId(String chronicleId) { return repository.findByChronicleId(chronicleId).stream().map(JpaCharacterAdapter::toDomain).toList(); }
     @Override public Optional<Character> findById(String id) { return repository.findById(id).map(JpaCharacterAdapter::toDomain); }
+    @Override public void deleteById(String id) { repository.deleteById(id); }
     private static Character toDomain(CharacterEntity entity) { return new Character(entity.getId(), entity.getChronicleId(), entity.getName(), entity.getPlayerId(), entity.getPdfObjectKey(), entity.getCreatedAt()); }
 }

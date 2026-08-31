@@ -18,4 +18,5 @@ public class InMemoryCharacterRepository implements CharacterRepository {
     @Override public List<Character> findAll() { return List.copyOf(store.values()); }
     @Override public List<Character> findByChronicleId(String chronicleId) { return store.values().stream().filter(c -> c.chronicleId().equals(chronicleId)).toList(); }
     @Override public Optional<Character> findById(String id) { return Optional.ofNullable(store.get(id)); }
+    @Override public void deleteById(String id) { store.remove(id); }
 }

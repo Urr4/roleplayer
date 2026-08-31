@@ -179,6 +179,29 @@ public class RecordingController {
         return recordingService.getTranscript(recordingId).stream().map(TranscriptSegmentDto::from).toList();
     }
 
+    @org.springframework.web.bind.annotation.DeleteMapping("/{recordingId}")
+    public ResponseEntity<Void> delete(@PathVariable String recordingId) {
+        try {
+            recordingService.deleteRecording(recordingId);
+            return ResponseEntity.noContent().build();
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.notFound().build();
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).build();
+        }
+    }
+
+    @org.springframework.web.bind.annotation.DeleteMapping("/{recordingId}/transcript")
+    public ResponseEntity<RecordingDto> deleteTranscript(@PathVariable String recordingId) {
+        try {
+            return ResponseEntity.ok(toDto(recordingService.deleteTranscript(recordingId)));
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.notFound().build();
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).build();
+        }
+    }
+
     private static RecordingSource parseStartSource(StartRecordingRequest request) {
         if (request == null || request.source() == null || request.source().isBlank()) {
             throw new IllegalArgumentException("source is required");

@@ -98,6 +98,11 @@ class RecordingProcessingServiceTest {
             public List<Recording> findByStatusIn(java.util.Collection<de.urr4.rp.roleplayer.domain.model.RecordingStatus> statuses) {
                 return List.of();
             }
+
+            @Override
+            public void deleteById(String id) {
+                currentRecording.set(null);
+            }
         };
 
         AtomicInteger concurrentStores = new AtomicInteger();

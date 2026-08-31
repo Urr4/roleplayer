@@ -8,4 +8,6 @@ public interface TranscriptSegmentRepository {
     TranscriptSegment save(TranscriptSegment segment);
 
     List<TranscriptSegment> findByRecordingIdOrderByStartMsAsc(String recordingId);
+
+    void deleteByRecordingId(String recordingId);
 }

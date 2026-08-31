@@ -34,6 +34,11 @@ public class JpaPlayerAdapter implements PlayerRepository {
         return repository.findById(id).map(JpaPlayerAdapter::toDomain);
     }
 
+    @Override
+    public void deleteById(String id) {
+        repository.deleteById(id);
+    }
+
     private static Player toDomain(PlayerEntity entity) {
         return new Player(entity.getId(), entity.getName());
     }

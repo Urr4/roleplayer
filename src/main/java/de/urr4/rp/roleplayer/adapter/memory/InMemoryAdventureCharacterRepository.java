@@ -41,4 +41,14 @@ public class InMemoryAdventureCharacterRepository implements AdventureCharacterR
     public void deleteById(String id) {
         store.remove(id);
     }
+
+    @Override
+    public void deleteByAdventureId(String adventureId) {
+        store.values().removeIf(link -> link.adventureId().equals(adventureId));
+    }
+
+    @Override
+    public void deleteByCharacterId(String characterId) {
+        store.values().removeIf(link -> link.characterId().equals(characterId));
+    }
 }

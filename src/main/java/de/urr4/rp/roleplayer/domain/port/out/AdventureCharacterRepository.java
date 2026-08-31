@@ -13,4 +13,8 @@ public interface AdventureCharacterRepository {
     Optional<AdventureCharacter> findByAdventureIdAndCharacterId(String adventureId, String characterId);
 
     void deleteById(String id);
+
+    void deleteByAdventureId(String adventureId);
+
+    void deleteByCharacterId(String characterId);
 }

@@ -7,6 +7,7 @@ import de.urr4.rp.roleplayer.web.dto.AdventureDto;
 import de.urr4.rp.roleplayer.web.dto.CreateAdventureRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.NoSuchElementException;
 
 @RestController
 public class AdventureController {
@@ -65,5 +67,17 @@ public class AdventureController {
     @PostMapping("/api/adventures/{id}/stop")
     public AdventureDto stop(@PathVariable String id) {
         return AdventureDto.from(adventureService.stopAdventure(id));
+    }
+
+    @DeleteMapping("/api/adventures/{id}")
+    public ResponseEntity<Void> delete(@PathVariable String id) {
+        try {
+            adventureService.deleteAdventure(id);
+            return ResponseEntity.noContent().build();
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.notFound().build();
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).build();
+        }
     }
 }

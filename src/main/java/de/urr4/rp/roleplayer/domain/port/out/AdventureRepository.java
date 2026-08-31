@@ -15,4 +15,6 @@ public interface AdventureRepository {
     Optional<Adventure> findById(String id);
 
     Optional<Adventure> findActiveByChronicleId(String chronicleId);
+
+    void deleteById(String id);
 }

@@ -41,6 +41,16 @@ public class JpaAdventureCharacterAdapter implements AdventureCharacterRepositor
         repository.deleteById(id);
     }
 
+    @Override
+    public void deleteByAdventureId(String adventureId) {
+        repository.deleteByAdventureId(adventureId);
+    }
+
+    @Override
+    public void deleteByCharacterId(String characterId) {
+        repository.deleteByCharacterId(characterId);
+    }
+
     private static AdventureCharacter toDomain(AdventureCharacterEntity entity) {
         return new AdventureCharacter(entity.getId(), entity.getAdventureId(), entity.getCharacterId(), entity.getAddedAt());
     }

@@ -13,4 +13,6 @@ public interface CharacterRepository {
     List<Character> findByChronicleId(String chronicleId);
 
     Optional<Character> findById(String id);
+
+    void deleteById(String id);
 }

@@ -34,6 +34,11 @@ public class JpaChronicleAdapter implements ChronicleRepository {
         return repository.findById(id).map(JpaChronicleAdapter::toDomain);
     }
 
+    @Override
+    public void deleteById(String id) {
+        repository.deleteById(id);
+    }
+
     private static Chronicle toDomain(ChronicleEntity entity) {
         return new Chronicle(entity.getId(), entity.getName(), entity.getCreatedAt());
     }

@@ -21,4 +21,5 @@ public class InMemoryRecordingRepository implements RecordingRepository {
     @Override public List<Recording> findByAdventureId(String adventureId) { return store.values().stream().filter(recording -> adventureId.equals(recording.adventureId())).toList(); }
     @Override public Optional<Recording> findById(String id) { return Optional.ofNullable(store.get(id)); }
     @Override public List<Recording> findByStatusIn(Collection<RecordingStatus> statuses) { return store.values().stream().filter(recording -> statuses.contains(recording.status())).toList(); }
+    @Override public void deleteById(String id) { store.remove(id); }
 }

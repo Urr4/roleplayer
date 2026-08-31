@@ -4,16 +4,23 @@ import {
   Box,
   Button,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  IconButton,
   List,
   ListItem,
   ListItemText,
   Stack,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
 import TornCard from '../components/TornCard';
-import { createPlayer, getPlayers } from '../api/client';
+import { createPlayer, deletePlayer, getPlayers } from '../api/client';
 import type { PlayerDto } from '../types';
 
 export default function PlayerTab() {
@@ -22,6 +29,7 @@ export default function PlayerTab() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDeletePlayer, setConfirmDeletePlayer] = useState<PlayerDto | null>(null);
 
   const refreshPlayers = async () => {
     setLoading(true);
@@ -73,6 +81,18 @@ export default function PlayerTab() {
       setError(err instanceof Error ? err.message : 'Unable to create player.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDeletePlayer = async () => {
+    if (!confirmDeletePlayer) return;
+    try {
+      await deletePlayer(confirmDeletePlayer.id);
+      await refreshPlayers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to delete player.');
+    } finally {
+      setConfirmDeletePlayer(null);
     }
   };
 
@@ -131,7 +151,18 @@ export default function PlayerTab() {
             ) : (
               <List disablePadding>
                 {players.map(player => (
-                  <ListItem key={player.id} disableGutters divider>
+                  <ListItem
+                    key={player.id}
+                    disableGutters
+                    divider
+                    secondaryAction={
+                      <Tooltip title="Delete player">
+                        <IconButton size="small" color="error" onClick={() => setConfirmDeletePlayer(player)}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    }
+                  >
                     <ListItemText primary={player.name} />
                   </ListItem>
                 ))}
@@ -140,6 +171,21 @@ export default function PlayerTab() {
           </Stack>
         </TornCard>
       </Stack>
+
+      <Dialog open={!!confirmDeletePlayer} onClose={() => setConfirmDeletePlayer(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete player?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to delete "{confirmDeletePlayer?.name}"? This cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDeletePlayer(null)}>Cancel</Button>
+          <Button color="error" variant="contained" onClick={() => void handleDeletePlayer()}>
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

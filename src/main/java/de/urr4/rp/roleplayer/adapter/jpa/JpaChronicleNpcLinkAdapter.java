@@ -14,4 +14,5 @@ public class JpaChronicleNpcLinkAdapter implements ChronicleNpcLinkRepository {
     @Override public void link(String chronicleId, String npcId) { repository.findByChronicleIdAndNpcId(chronicleId, npcId).orElseGet(() -> repository.save(new ChronicleNpcEntity(chronicleId, npcId))); }
     @Override public void unlink(String chronicleId, String npcId) { repository.findByChronicleIdAndNpcId(chronicleId, npcId).ifPresent(repository::delete); }
     @Override public List<String> findNpcIdsByChronicle(String chronicleId) { return repository.findByChronicleId(chronicleId).stream().map(ChronicleNpcEntity::getNpcId).toList(); }
+    @Override public void unlinkAll(String chronicleId) { repository.deleteByChronicleId(chronicleId); }
 }

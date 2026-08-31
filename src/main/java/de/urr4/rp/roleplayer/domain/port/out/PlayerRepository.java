@@ -11,4 +11,6 @@ public interface PlayerRepository {
     List<Player> findAll();
 
     Optional<Player> findById(String id);
+
+    void deleteById(String id);
 }

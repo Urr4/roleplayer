@@ -23,5 +23,6 @@ public class JpaRecordingAdapter implements RecordingRepository {
     @Override public List<Recording> findByAdventureId(String adventureId) { return repository.findByAdventureId(adventureId).stream().map(JpaRecordingAdapter::toDomain).toList(); }
     @Override public Optional<Recording> findById(String id) { return repository.findById(id).map(JpaRecordingAdapter::toDomain); }
     @Override public List<Recording> findByStatusIn(Collection<RecordingStatus> statuses) { return repository.findByStatusIn(statuses).stream().map(JpaRecordingAdapter::toDomain).toList(); }
+    @Override public void deleteById(String id) { repository.deleteById(id); }
     private static Recording toDomain(RecordingEntity entity) { return new Recording(entity.getId(), entity.getChronicleId(), entity.getAdventureId(), entity.getSource(), entity.getStatus(), entity.getStartedAt(), entity.getEndedAt(), entity.getAudioObjectKey(), entity.getTranscriptObjectKey(), entity.getErrorMessage()); }
 }

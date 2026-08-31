@@ -7,10 +7,12 @@ import de.urr4.rp.roleplayer.domain.model.RecordingStatus;
 import de.urr4.rp.roleplayer.domain.model.Adventure;
 import de.urr4.rp.roleplayer.domain.model.Chronicle;
 import de.urr4.rp.roleplayer.domain.model.TranscriptSegment;
+import de.urr4.rp.roleplayer.domain.port.out.AudioStore;
 import de.urr4.rp.roleplayer.domain.port.out.RecordingRepository;
 import de.urr4.rp.roleplayer.domain.port.out.AdventureRepository;
 import de.urr4.rp.roleplayer.domain.port.out.ChronicleRepository;
 import de.urr4.rp.roleplayer.domain.port.out.TranscriptSegmentRepository;
+import de.urr4.rp.roleplayer.domain.port.out.TranscriptStore;
 import de.urr4.rp.roleplayer.domain.port.out.VoiceChannelCapture;
 import org.springframework.stereotype.Service;
 
@@ -19,6 +21,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -29,6 +32,7 @@ public class RecordingService {
     private static final String DISCORD_RECORDING_EXTENSION = "wav";
     private static final String DISCORD_RECORDING_CONTENT_TYPE = "audio/wav";
     private static final String TRANSCRIPTION_LANGUAGE = "de";
+    private static final Set<RecordingStatus> LIVE_STATUSES = Set.of(RecordingStatus.RECORDING, RecordingStatus.PAUSED);
 
     private final RecordingRepository recordingRepository;
     private final TranscriptSegmentRepository transcriptSegmentRepository;
@@ -37,6 +41,8 @@ public class RecordingService {
     private final RecordingProcessingService recordingProcessingService;
     private final LiveRecordingBufferManager liveRecordingBufferManager;
     private final Optional<VoiceChannelCapture> voiceChannelCapture;
+    private final AudioStore audioStore;
+    private final TranscriptStore transcriptStore;
 
     public RecordingService(RecordingRepository recordingRepository,
                             TranscriptSegmentRepository transcriptSegmentRepository,
@@ -44,7 +50,9 @@ public class RecordingService {
                             AdventureRepository adventureRepository,
                             RecordingProcessingService recordingProcessingService,
                             LiveRecordingBufferManager liveRecordingBufferManager,
-                            Optional<VoiceChannelCapture> voiceChannelCapture) {
+                            Optional<VoiceChannelCapture> voiceChannelCapture,
+                            AudioStore audioStore,
+                            TranscriptStore transcriptStore) {
         this.recordingRepository = recordingRepository;
         this.transcriptSegmentRepository = transcriptSegmentRepository;
         this.chronicleRepository = chronicleRepository;
@@ -52,6 +60,8 @@ public class RecordingService {
         this.recordingProcessingService = recordingProcessingService;
         this.liveRecordingBufferManager = liveRecordingBufferManager;
         this.voiceChannelCapture = voiceChannelCapture;
+        this.audioStore = audioStore;
+        this.transcriptStore = transcriptStore;
     }
 
     public Recording uploadAndTranscribe(String adventureId, String originalFilename, byte[] audioBytes,
@@ -191,6 +201,61 @@ public class RecordingService {
                 .flatMap(recording -> transcriptSegmentRepository
                         .findByRecordingIdOrderByStartMsAsc(recording.id()).stream())
                 .toList();
+    }
+
+    public void deleteRecording(String recordingId) {
+        Recording recording = recordingRepository.findById(recordingId)
+                .orElseThrow(() -> new NoSuchElementException("Recording not found: " + recordingId));
+        if (LIVE_STATUSES.contains(recording.status())) {
+            throw new IllegalStateException("Recording is still active; stop it before deleting");
+        }
+        deleteRecordingArtifacts(recording);
+        transcriptSegmentRepository.deleteByRecordingId(recordingId);
+        recordingRepository.deleteById(recordingId);
+    }
+
+    public Recording deleteTranscript(String recordingId) {
+        Recording recording = recordingRepository.findById(recordingId)
+                .orElseThrow(() -> new NoSuchElementException("Recording not found: " + recordingId));
+        if (LIVE_STATUSES.contains(recording.status())) {
+            throw new IllegalStateException("Recording is still active; stop it before deleting its transcript");
+        }
+        transcriptSegmentRepository.deleteByRecordingId(recordingId);
+        if (recording.transcriptObjectKey() != null && !recording.transcriptObjectKey().isBlank()) {
+            transcriptStore.delete(recording.transcriptObjectKey());
+        }
+        Recording updated = new Recording(recording.id(), recording.chronicleId(), recording.adventureId(),
+                recording.source(), recording.status(), recording.startedAt(), recording.endedAt(),
+                recording.audioObjectKey(), null, recording.errorMessage());
+        return recordingRepository.save(updated);
+    }
+
+    /**
+     * Cascade-deletes every recording (and its audio/transcript artifacts) that
+     * belongs to the given adventure. Used when an Adventure or its owning
+     * Chronicle is deleted.
+     */
+    void deleteRecordingsByAdventureId(String adventureId) {
+        for (Recording recording : recordingRepository.findByAdventureId(adventureId)) {
+            if (LIVE_STATUSES.contains(recording.status())) {
+                throw new IllegalStateException(
+                        "Recording " + recording.id() + " is still active; stop it before deleting");
+            }
+        }
+        for (Recording recording : recordingRepository.findByAdventureId(adventureId)) {
+            deleteRecordingArtifacts(recording);
+            transcriptSegmentRepository.deleteByRecordingId(recording.id());
+            recordingRepository.deleteById(recording.id());
+        }
+    }
+
+    private void deleteRecordingArtifacts(Recording recording) {
+        if (recording.audioObjectKey() != null && !recording.audioObjectKey().isBlank()) {
+            audioStore.delete(recording.audioObjectKey());
+        }
+        if (recording.transcriptObjectKey() != null && !recording.transcriptObjectKey().isBlank()) {
+            transcriptStore.delete(recording.transcriptObjectKey());
+        }
     }
 
     private static String fileExtensionOf(String originalFilename) {

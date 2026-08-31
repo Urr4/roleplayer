@@ -46,6 +46,11 @@ public class JpaAdventureAdapter implements AdventureRepository {
                 .map(JpaAdventureAdapter::toDomain);
     }
 
+    @Override
+    public void deleteById(String id) {
+        repository.deleteById(id);
+    }
+
     private static Adventure toDomain(AdventureEntity entity) {
         return new Adventure(entity.getId(), entity.getChronicleId(), entity.getName(), entity.getStatus(),
                 entity.getCreatedAt(), entity.getStartedAt(), entity.getEndedAt());

@@ -6,4 +6,5 @@ import java.util.List;
 
 public interface SpringDataTranscriptSegmentRepository extends JpaRepository<TranscriptSegmentEntity, String> {
     List<TranscriptSegmentEntity> findByRecordingIdOrderByStartMsAsc(String recordingId);
+    void deleteByRecordingId(String recordingId);
 }

@@ -8,4 +8,5 @@ import java.util.Optional;
 public interface SpringDataChronicleNpcRepository extends JpaRepository<ChronicleNpcEntity, Long> {
     List<ChronicleNpcEntity> findByChronicleId(String chronicleId);
     Optional<ChronicleNpcEntity> findByChronicleIdAndNpcId(String chronicleId, String npcId);
+    void deleteByChronicleId(String chronicleId);
 }

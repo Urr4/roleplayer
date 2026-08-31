@@ -62,6 +62,12 @@ public class CharacterController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    @org.springframework.web.bind.annotation.DeleteMapping("/api/characters/{id}")
+    public ResponseEntity<Void> delete(@PathVariable String id) {
+        characterService.deleteCharacter(id);
+        return ResponseEntity.noContent().build();
+    }
+
     private static byte[] bytesOf(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             return null;

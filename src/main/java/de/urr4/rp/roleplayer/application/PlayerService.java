@@ -24,4 +24,8 @@ public class PlayerService {
     public List<Player> listPlayers() {
         return playerRepository.findAll();
     }
+
+    public void deletePlayer(String playerId) {
+        playerRepository.deleteById(playerId);
+    }
 }

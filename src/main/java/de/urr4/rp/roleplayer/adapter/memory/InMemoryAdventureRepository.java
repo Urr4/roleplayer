@@ -43,4 +43,9 @@ public class InMemoryAdventureRepository implements AdventureRepository {
                 .filter(a -> a.chronicleId().equals(chronicleId) && a.status() == AdventureStatus.ACTIVE)
                 .findFirst();
     }
+
+    @Override
+    public void deleteById(String id) {
+        store.remove(id);
+    }
 }

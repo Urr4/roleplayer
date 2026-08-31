@@ -31,6 +31,11 @@ public class JpaTranscriptSegmentAdapter implements TranscriptSegmentRepository 
                 .toList();
     }
 
+    @Override
+    public void deleteByRecordingId(String recordingId) {
+        repository.deleteByRecordingId(recordingId);
+    }
+
     private static TranscriptSegment toDomain(TranscriptSegmentEntity entity) {
         return new TranscriptSegment(entity.getId(), entity.getRecordingId(), entity.getSpeakerLabel(),
                 entity.getStartMs(), entity.getEndMs(), entity.getText(), entity.getCreatedAt());

@@ -11,4 +11,6 @@ public interface ChronicleRepository {
     List<Chronicle> findAll();
 
     Optional<Chronicle> findById(String id);
+
+    void deleteById(String id);
 }

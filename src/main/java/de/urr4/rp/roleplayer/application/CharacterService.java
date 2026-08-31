@@ -1,6 +1,7 @@
 package de.urr4.rp.roleplayer.application;
 
 import de.urr4.rp.roleplayer.domain.model.Character;
+import de.urr4.rp.roleplayer.domain.port.out.AdventureCharacterRepository;
 import de.urr4.rp.roleplayer.domain.port.out.CharacterRepository;
 import de.urr4.rp.roleplayer.domain.port.out.ChronicleRepository;
 import de.urr4.rp.roleplayer.domain.port.out.PdfStore;
@@ -20,13 +21,16 @@ public class CharacterService {
     private final ChronicleRepository chronicleRepository;
     private final PlayerRepository playerRepository;
     private final PdfStore pdfStore;
+    private final AdventureCharacterRepository adventureCharacterRepository;
 
     public CharacterService(CharacterRepository characterRepository, ChronicleRepository chronicleRepository,
-                            PlayerRepository playerRepository, PdfStore pdfStore) {
+                            PlayerRepository playerRepository, PdfStore pdfStore,
+                            AdventureCharacterRepository adventureCharacterRepository) {
         this.characterRepository = characterRepository;
         this.chronicleRepository = chronicleRepository;
         this.playerRepository = playerRepository;
         this.pdfStore = pdfStore;
+        this.adventureCharacterRepository = adventureCharacterRepository;
     }
 
     public Character createCharacter(String chronicleId, String name, String playerId, byte[] pdfBytes) {
@@ -71,6 +75,15 @@ public class CharacterService {
                 .map(Character::pdfObjectKey)
                 .filter(key -> key != null && !key.isBlank())
                 .map(pdfStore::presignedUrl);
+    }
+
+    public void deleteCharacter(String characterId) {
+        Character existing = requireCharacter(characterId);
+        if (existing.pdfObjectKey() != null && !existing.pdfObjectKey().isBlank()) {
+            pdfStore.delete(existing.pdfObjectKey());
+        }
+        adventureCharacterRepository.deleteByCharacterId(characterId);
+        characterRepository.deleteById(characterId);
     }
 
     private void requireChronicle(String chronicleId) {

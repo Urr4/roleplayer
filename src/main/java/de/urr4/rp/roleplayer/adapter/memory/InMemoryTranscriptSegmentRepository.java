@@ -33,4 +33,9 @@ public class InMemoryTranscriptSegmentRepository implements TranscriptSegmentRep
                 .sorted(Comparator.comparingLong(TranscriptSegment::startMs))
                 .toList();
     }
+
+    @Override
+    public void deleteByRecordingId(String recordingId) {
+        store.values().removeIf(segment -> segment.recordingId().equals(recordingId));
+    }
 }

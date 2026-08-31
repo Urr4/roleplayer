@@ -21,6 +21,8 @@ export const getChronicles = () => api.get<ChronicleDto[]>('/chronicles').then(r
 export const createChronicle = (name: string) => api.post<ChronicleDto>('/chronicles', { name }).then(r => r.data);
 export const getChronicle = (id: string) => api.get<ChronicleDto>(`/chronicles/${id}`).then(r => r.data);
 
+export const deleteChronicle = (id: string) => api.delete(`/chronicles/${id}`);
+
 // ── Adventures ────────────────────────────────────────────────────────────────
 export const getAdventures = (chronicleId: string) =>
   api.get<AdventureDto[]>(`/chronicles/${chronicleId}/adventures`).then(r => r.data);
@@ -43,9 +45,13 @@ export const startAdventure = (id: string) => api.post<AdventureDto>(`/adventure
 
 export const stopAdventure = (id: string) => api.post<AdventureDto>(`/adventures/${id}/stop`).then(r => r.data);
 
+export const deleteAdventure = (id: string) => api.delete(`/adventures/${id}`);
+
 // ── Players (global) ─────────────────────────────────────────────────────────
 export const getPlayers = () => api.get<PlayerDto[]>('/players').then(r => r.data);
 export const createPlayer = (name: string) => api.post<PlayerDto>('/players', { name }).then(r => r.data);
+
+export const deletePlayer = (id: string) => api.delete(`/players/${id}`);
 
 // ── Characters (chronicle-scoped) ────────────────────────────────────────────
 export const getAllCharacters = () => api.get<CharacterDto[]>('/characters').then(r => r.data);
@@ -72,6 +78,8 @@ export const replaceCharacterSheet = (characterId: string, sheet: File) => {
 
 export const getCharacterSheetUrl = (characterId: string) =>
   api.get<{ url: string }>(`/characters/${characterId}/sheet-url`).then(r => r.data.url);
+
+export const deleteCharacter = (characterId: string) => api.delete(`/characters/${characterId}`);
 
 // ── Adventure characters (participating characters per adventure) ──────────
 export const getAdventureCharacters = (adventureId: string) =>
@@ -143,6 +151,12 @@ export const stopRecording = (adventureId: string, recordingId: string) =>
 
 export const getRecordingTranscript = (adventureId: string, recordingId: string) =>
   api.get<TranscriptSegmentDto[]>(`/adventures/${adventureId}/recordings/${recordingId}/transcript`).then(r => r.data);
+
+export const deleteRecording = (adventureId: string, recordingId: string) =>
+  api.delete(`/adventures/${adventureId}/recordings/${recordingId}`);
+
+export const deleteRecordingTranscript = (adventureId: string, recordingId: string) =>
+  api.delete<RecordingDto>(`/adventures/${adventureId}/recordings/${recordingId}/transcript`).then(r => r.data);
 
 // ── Discord bot ───────────────────────────────────────────────────────────────
 export const getDiscordGuilds = () => api.get<DiscordGuildDto[]>('/discord/guilds').then(r => r.data);

@@ -17,4 +17,6 @@ public interface RecordingRepository {
     Optional<Recording> findById(String id);
 
     List<Recording> findByStatusIn(Collection<RecordingStatus> statuses);
+
+    void deleteById(String id);
 }

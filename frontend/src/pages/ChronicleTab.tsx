@@ -9,6 +9,7 @@ import {
   CardContent,
   Chip,
   Dialog,
+  DialogActions,
   DialogContent,
   DialogTitle,
   Divider,
@@ -26,6 +27,7 @@ import {
   Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import CloseIcon from '@mui/icons-material/Close';
@@ -39,13 +41,18 @@ import StopIcon from '@mui/icons-material/Stop';
 import StopCircleIcon from '@mui/icons-material/StopCircle';
 import ExploreIcon from '@mui/icons-material/Explore';
 import TranscriptPanel from './TranscriptPanel';
-import type { AdventureCharacterDto, AdventureDto, CharacterDto, ChronicleDto, DiscordGuildDto, DiscordVoiceChannelDto, PlayerDto, RecordingDto } from '../types';
+import type { AdventureCharacterDto, AdventureDto, CharacterDto, ChronicleDto, DiscordGuildDto, DiscordVoiceChannelDto, PlayerDto, RecordingDto, TranscriptSegmentDto } from '../types';
 import {
   addAdventureCharacter,
   appendRecordingChunk,
   createAdventure,
   createCharacter,
   createChronicle,
+  deleteAdventure,
+  deleteCharacter,
+  deleteChronicle,
+  deleteRecording,
+  deleteRecordingTranscript,
   getAdventureCharacters,
   getAdventures,
   getAllCharacters,
@@ -55,6 +62,7 @@ import {
   getDiscordVoiceChannels,
   getPlayers,
   getRecordings,
+  getRecordingTranscript,
   importCharacterIntoChronicle,
   pauseRecording,
   removeAdventureCharacter,
@@ -164,6 +172,17 @@ export default function ChronicleTab({
   const [liveRecordingAdventureId, setLiveRecordingAdventureId] = useState<string | null>(null);
   const [adventureRecordings, setAdventureRecordings] = useState<RecordingDto[]>([]);
   const [recordingBusy, setRecordingBusy] = useState(false);
+  const [expandedRecordingId, setExpandedRecordingId] = useState<string | null>(null);
+  const [recordingTranscripts, setRecordingTranscripts] = useState<Record<string, TranscriptSegmentDto[]>>({});
+  const [recordingTranscriptsLoading, setRecordingTranscriptsLoading] = useState<Record<string, boolean>>({});
+  const [confirmDelete, setConfirmDelete] = useState<
+    | { kind: 'chronicle'; id: string; label: string }
+    | { kind: 'character'; id: string; label: string }
+    | { kind: 'adventure'; id: string; label: string }
+    | { kind: 'recording'; id: string; adventureId: string; label: string }
+    | { kind: 'transcript'; id: string; adventureId: string; label: string }
+    | null
+  >(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const pendingChunkUploadsRef = useRef<Promise<void>[]>([]);
@@ -479,6 +498,62 @@ export default function ChronicleTab({
     }
   };
 
+  const handleToggleRecording = (recordingId: string) => {
+    setExpandedRecordingId(current => {
+      const next = current === recordingId ? null : recordingId;
+      if (next && !recordingTranscripts[next] && expandedAdventureId) {
+        setRecordingTranscriptsLoading(prev => ({ ...prev, [next]: true }));
+        getRecordingTranscript(expandedAdventureId, next)
+          .then(segments => setRecordingTranscripts(prev => ({ ...prev, [next]: segments })))
+          .catch(err => setError(err instanceof Error ? err.message : 'Unable to load transcript.'))
+          .finally(() => setRecordingTranscriptsLoading(prev => ({ ...prev, [next]: false })));
+      }
+      return next;
+    });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!confirmDelete) return;
+    try {
+      switch (confirmDelete.kind) {
+        case 'chronicle':
+          await deleteChronicle(confirmDelete.id);
+          onChroniclesChanged();
+          if (confirmDelete.id === activeChronicleId) onSelectChronicle('');
+          break;
+        case 'character':
+          await deleteCharacter(confirmDelete.id);
+          await Promise.all([refreshRoster(), refreshChronicleCharacters()]);
+          break;
+        case 'adventure':
+          await deleteAdventure(confirmDelete.id);
+          if (confirmDelete.id === expandedAdventureId) setExpandedAdventureId(null);
+          await refreshAdventures();
+          break;
+        case 'recording':
+          await deleteRecording(confirmDelete.adventureId, confirmDelete.id);
+          if (confirmDelete.id === expandedRecordingId) setExpandedRecordingId(null);
+          if (confirmDelete.adventureId === expandedAdventureId) {
+            const state = await fetchRecordingState(expandedAdventureId);
+            setAdventureRecordings(state.recordings);
+          }
+          break;
+        case 'transcript':
+          await deleteRecordingTranscript(confirmDelete.adventureId, confirmDelete.id);
+          setRecordingTranscripts(prev => ({ ...prev, [confirmDelete.id]: [] }));
+          if (confirmDelete.adventureId === expandedAdventureId) {
+            const state = await fetchRecordingState(expandedAdventureId);
+            setAdventureRecordings(state.recordings);
+          }
+          break;
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to delete.');
+    } finally {
+      setConfirmDelete(null);
+    }
+  };
+
   const handleUploadRecording = async (file: File) => {
     const adventureId = recordDialogAdventureId;
     if (!adventureId) return;
@@ -705,14 +780,34 @@ export default function ChronicleTab({
 
                 <List sx={{ py: 0 }}>
                   {chronicles.map(chronicle => (
-                    <ListItemButton
+                    <ListItem
                       key={chronicle.id}
-                      selected={chronicle.id === activeChronicleId}
-                      onClick={() => onSelectChronicle(chronicle.id)}
+                      disablePadding
+                      secondaryAction={
+                        <Tooltip title="Delete chronicle (and all its adventures, characters, recordings)">
+                          <IconButton
+                            edge="end"
+                            size="small"
+                            color="error"
+                            onClick={event => {
+                              event.stopPropagation();
+                              setConfirmDelete({ kind: 'chronicle', id: chronicle.id, label: chronicle.name });
+                            }}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      }
                       sx={{ borderRadius: 2, mb: 0.5 }}
                     >
-                      <ListItemText primary={chronicle.name} secondary={new Date(chronicle.createdAt).toLocaleString()} />
-                    </ListItemButton>
+                      <ListItemButton
+                        selected={chronicle.id === activeChronicleId}
+                        onClick={() => onSelectChronicle(chronicle.id)}
+                        sx={{ borderRadius: 2 }}
+                      >
+                        <ListItemText primary={chronicle.name} secondary={new Date(chronicle.createdAt).toLocaleString()} />
+                      </ListItemButton>
+                    </ListItem>
                   ))}
                   {chronicles.length === 0 && (
                     <Typography color="text.secondary" sx={{ fontStyle: 'italic' }}>
@@ -825,6 +920,15 @@ export default function ChronicleTab({
                                     />
                                   </Button>
                                 )}
+                                <Tooltip title="Delete character">
+                                  <IconButton
+                                    size="small"
+                                    color="error"
+                                    onClick={() => setConfirmDelete({ kind: 'character', id: character.id, label: character.name })}
+                                  >
+                                    <DeleteIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
                               </Stack>
                             </CardContent>
                           </Card>
@@ -880,42 +984,56 @@ export default function ChronicleTab({
                               key={adventure.id}
                               disablePadding
                               secondaryAction={
-                                adventure.status === 'ACTIVE' ? (
-                                  <Tooltip title="Stop adventure">
+                                <Stack direction="row" spacing={0.5} alignItems="center">
+                                  {adventure.status === 'ACTIVE' ? (
+                                    <Tooltip title="Stop adventure">
+                                      <IconButton
+                                        color="error"
+                                        onClick={event => {
+                                          event.stopPropagation();
+                                          void handleStopAdventure(adventure.id);
+                                        }}
+                                      >
+                                        <StopCircleIcon />
+                                      </IconButton>
+                                    </Tooltip>
+                                  ) : adventure.status === 'PLANNED' || adventure.status === 'COMPLETED' ? (
+                                    <Tooltip
+                                      title={
+                                        activeAdventure
+                                          ? 'Stop the active adventure first'
+                                          : adventure.status === 'COMPLETED'
+                                            ? 'Continue adventure'
+                                            : 'Start adventure'
+                                      }
+                                    >
+                                      <span>
+                                        <IconButton
+                                          color="success"
+                                          disabled={!!activeAdventure && activeAdventure.id !== adventure.id}
+                                          onClick={event => {
+                                            event.stopPropagation();
+                                            void handleStartAdventure(adventure.id);
+                                          }}
+                                        >
+                                          <PlayCircleIcon />
+                                        </IconButton>
+                                      </span>
+                                    </Tooltip>
+                                  ) : null}
+                                  <Tooltip title="Delete adventure (and its recordings)">
                                     <IconButton
+                                      size="small"
                                       color="error"
                                       onClick={event => {
                                         event.stopPropagation();
-                                        void handleStopAdventure(adventure.id);
+                                        setConfirmDelete({ kind: 'adventure', id: adventure.id, label: adventure.name });
                                       }}
                                     >
-                                      <StopCircleIcon />
+                                      <DeleteIcon fontSize="small" />
                                     </IconButton>
                                   </Tooltip>
-                                ) : adventure.status === 'PLANNED' || adventure.status === 'COMPLETED' ? (
-                                  <Tooltip
-                                    title={
-                                      activeAdventure
-                                        ? 'Stop the active adventure first'
-                                        : adventure.status === 'COMPLETED'
-                                          ? 'Continue adventure'
-                                          : 'Start adventure'
-                                    }
-                                  >
-                                    <span>
-                                      <IconButton
-                                        color="success"
-                                        disabled={!!activeAdventure && activeAdventure.id !== adventure.id}
-                                        onClick={event => {
-                                          event.stopPropagation();
-                                          void handleStartAdventure(adventure.id);
-                                        }}
-                                      >
-                                        <PlayCircleIcon />
-                                      </IconButton>
-                                    </span>
-                                  </Tooltip>
-                                ) : null
+                                </Stack>
                               }
                               sx={{ borderRadius: 2, mb: 0.5 }}
                             >
@@ -1100,38 +1218,108 @@ export default function ChronicleTab({
                                     Recorded audio files
                                   </Typography>
                                   <Stack spacing={1}>
-                                    {adventureRecordings.map(recording => (
-                                      <Box
-                                        key={recording.id}
-                                        sx={{
-                                          border: '1px solid',
-                                          borderColor: 'divider',
-                                          borderRadius: 1,
-                                          p: 1,
-                                        }}
-                                      >
-                                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }} justifyContent="space-between">
-                                          <Typography variant="body2">
-                                            {recordingSourceLabel(recording.source)} · {recordingStatusLabel(recording.status)} ·{' '}
-                                            {formatRecordingTimeRange(recording.startedAt, recording.endedAt)}
-                                          </Typography>
-                                        </Stack>
-                                        {recording.audioUrl ? (
-                                          <Box component="audio" controls src={recording.audioUrl} sx={{ width: '100%', mt: 0.5 }} />
-                                        ) : (
-                                          <Typography variant="caption" color="text.secondary">
-                                            {recording.status === 'AWAITING_ASR'
-                                              ? 'Audio stored — waiting for the ASR service to become reachable to transcribe it.'
-                                              : 'Audio not available yet.'}
-                                          </Typography>
-                                        )}
-                                        {recording.status === 'FAILED' && recording.errorMessage && (
-                                          <Alert severity="error" sx={{ mt: 0.5 }}>
-                                            {recording.errorMessage}
-                                          </Alert>
-                                        )}
-                                      </Box>
-                                    ))}
+                                    {adventureRecordings.map(recording => {
+                                      const isExpanded = expandedRecordingId === recording.id;
+                                      const transcript = recordingTranscripts[recording.id];
+                                      const transcriptLoading = !!recordingTranscriptsLoading[recording.id];
+                                      return (
+                                        <Box
+                                          key={recording.id}
+                                          sx={{
+                                            border: '1px solid',
+                                            borderColor: 'divider',
+                                            borderRadius: 1,
+                                            p: 1,
+                                          }}
+                                        >
+                                          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }} justifyContent="space-between">
+                                            <ListItemButton
+                                              onClick={() => handleToggleRecording(recording.id)}
+                                              sx={{ borderRadius: 1, px: 1, py: 0.5, flexGrow: 1 }}
+                                            >
+                                              <Typography variant="body2">
+                                                {formatRecordingTimeRange(recording.startedAt, recording.endedAt)} ·{' '}
+                                                {recordingSourceLabel(recording.source)} · {recordingStatusLabel(recording.status)}
+                                              </Typography>
+                                            </ListItemButton>
+                                            <Tooltip title="Delete recording (audio + transcript)">
+                                              <IconButton
+                                                size="small"
+                                                color="error"
+                                                onClick={() =>
+                                                  setConfirmDelete({
+                                                    kind: 'recording',
+                                                    id: recording.id,
+                                                    adventureId: recording.adventureId,
+                                                    label: formatRecordingTimeRange(recording.startedAt, recording.endedAt),
+                                                  })
+                                                }
+                                              >
+                                                <DeleteIcon fontSize="small" />
+                                              </IconButton>
+                                            </Tooltip>
+                                          </Stack>
+                                          {isExpanded && (
+                                            <Box sx={{ mt: 1 }}>
+                                              {recording.audioUrl ? (
+                                                <Box component="audio" controls src={recording.audioUrl} sx={{ width: '100%' }} />
+                                              ) : (
+                                                <Typography variant="caption" color="text.secondary">
+                                                  {recording.status === 'AWAITING_ASR'
+                                                    ? 'Audio stored — waiting for the ASR service to become reachable to transcribe it.'
+                                                    : 'Audio not available yet.'}
+                                                </Typography>
+                                              )}
+                                              {recording.status === 'FAILED' && recording.errorMessage && (
+                                                <Alert severity="error" sx={{ mt: 0.5 }}>
+                                                  {recording.errorMessage}
+                                                </Alert>
+                                              )}
+                                              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 1 }}>
+                                                <Typography variant="caption" color="text.secondary">
+                                                  Transcript
+                                                </Typography>
+                                                {transcript && transcript.length > 0 && (
+                                                  <Tooltip title="Delete transcript only">
+                                                    <IconButton
+                                                      size="small"
+                                                      color="error"
+                                                      onClick={() =>
+                                                        setConfirmDelete({
+                                                          kind: 'transcript',
+                                                          id: recording.id,
+                                                          adventureId: recording.adventureId,
+                                                          label: formatRecordingTimeRange(recording.startedAt, recording.endedAt),
+                                                        })
+                                                      }
+                                                    >
+                                                      <DeleteIcon fontSize="small" />
+                                                    </IconButton>
+                                                  </Tooltip>
+                                                )}
+                                              </Stack>
+                                              {transcriptLoading ? (
+                                                <Typography variant="caption" color="text.secondary">
+                                                  Loading transcript…
+                                                </Typography>
+                                              ) : transcript && transcript.length > 0 ? (
+                                                <Stack spacing={0.25} sx={{ maxHeight: 240, overflowY: 'auto' }}>
+                                                  {transcript.map(segment => (
+                                                    <Typography key={segment.id} variant="body2">
+                                                      <b>{segment.speakerLabel}:</b> {segment.text}
+                                                    </Typography>
+                                                  ))}
+                                                </Stack>
+                                              ) : (
+                                                <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                                                  No transcript yet.
+                                                </Typography>
+                                              )}
+                                            </Box>
+                                          )}
+                                        </Box>
+                                      );
+                                    })}
                                   </Stack>
                                 </Box>
                               )}
@@ -1158,6 +1346,26 @@ export default function ChronicleTab({
           )}
         </Grid>
       </Grid>
+
+      <Dialog open={!!confirmDelete} onClose={() => setConfirmDelete(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete {confirmDelete?.kind}?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to delete "{confirmDelete?.label}"?
+            {confirmDelete?.kind === 'chronicle' && ' This also deletes all its adventures, characters, and recordings.'}
+            {confirmDelete?.kind === 'adventure' && ' This also deletes all its recordings and transcripts.'}
+            {confirmDelete?.kind === 'recording' && ' This deletes the audio file and its transcript.'}
+            {confirmDelete?.kind === 'transcript' && ' The audio file itself is kept.'}
+            {' '}This cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDelete(null)}>Cancel</Button>
+          <Button color="error" variant="contained" onClick={() => void handleConfirmDelete()}>
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={!!viewerUrl} onClose={() => setViewerUrl(null)} maxWidth="md" fullWidth>
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

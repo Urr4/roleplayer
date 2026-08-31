@@ -8,4 +8,6 @@ public interface ChronicleNpcLinkRepository {
     void unlink(String chronicleId, String npcId);
 
     List<String> findNpcIdsByChronicle(String chronicleId);
+
+    void unlinkAll(String chronicleId);
 }

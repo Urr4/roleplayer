@@ -27,7 +27,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.mockito.ArgumentCaptor;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -100,7 +102,7 @@ class LiveRecordingBufferManagerTest {
         verify(audioStore, times(2)).store(anyString(), audioBytesCaptor.capture(), anyString());
         assertEquals(2, audioBytesCaptor.getAllValues().size());
         assertArrayEquals(new byte[]{1, 2, 3, 4, 5}, audioBytesCaptor.getAllValues().get(1));
-        verify(processingService, times(2)).processLiveDelta(any(Recording.class), anyString(), any(byte[].class),
+        verify(processingService, times(2)).processLiveWebmChunks(any(Recording.class), anyString(), any(List.class),
                 anyLong(), any(Instant.class), anyString(), anyBoolean(), any(Object.class), any(Runnable.class));
         assertFalse(Files.exists(bufferDirectory.resolve(recording.id() + ".audio")));
     }
@@ -135,12 +137,21 @@ class LiveRecordingBufferManagerTest {
         clock.advance(Duration.ofSeconds(5));
         manager.pause(recording.id());
 
-        ArgumentCaptor<byte[]> deltaBytesCaptor = ArgumentCaptor.forClass(byte[].class);
-        verify(processingService, times(2)).processLiveDelta(any(Recording.class), anyString(), deltaBytesCaptor.capture(),
-                anyLong(), any(Instant.class), anyString(), anyBoolean(), any(Object.class), any(Runnable.class));
-        List<byte[]> capturedDeltas = deltaBytesCaptor.getAllValues();
-        assertArrayEquals(new byte[]{1, 2, 3}, capturedDeltas.get(0));
-        assertArrayEquals(new byte[]{1, 2, 3, 4, 5}, capturedDeltas.get(1));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<byte[]>> chunkBytesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(processingService, times(2)).processLiveWebmChunks(any(Recording.class), anyString(),
+                chunkBytesCaptor.capture(), anyLong(), any(Instant.class), anyString(), anyBoolean(), any(Object.class),
+                any(Runnable.class));
+        List<List<byte[]>> capturedChunkBatches = chunkBytesCaptor.getAllValues();
+        assertEquals(1, capturedChunkBatches.get(0).size());
+        assertArrayEquals(new byte[]{1, 2, 3}, capturedChunkBatches.get(0).get(0));
+        // The mocked processingService never invokes the onChunksPersisted
+        // callback, so the transcription boundary is never advanced - the
+        // second flush should therefore still see the first (not-yet-
+        // transcribed, per this mock) chunk in addition to the new one.
+        assertEquals(2, capturedChunkBatches.get(1).size());
+        assertArrayEquals(new byte[]{1, 2, 3}, capturedChunkBatches.get(1).get(0));
+        assertArrayEquals(new byte[]{4, 5}, capturedChunkBatches.get(1).get(1));
     }
 
     @Test
@@ -221,12 +232,67 @@ class LiveRecordingBufferManagerTest {
         clock.advance(Duration.ofSeconds(5));
         Recording stopped = manager.stop(recording.id());
         assertEquals(de.urr4.rp.roleplayer.domain.model.RecordingStatus.PROCESSING, stopped.status());
+        // Regression test: transcriptObjectKey used to stay null here (live
+        // recordings, unlike uploads, never pre-generate one) and get passed
+        // straight through to the object store as the storage key, which
+        // crashed with "Parameter 'Key' must not be null" and left the
+        // recording FAILED.
+        assertNotNull(stopped.transcriptObjectKey());
 
         ArgumentCaptor<List<SpeakerAudioDelta>> speakerAudioCaptor = ArgumentCaptor.forClass(List.class);
         verify(processingService, times(1)).processDiscordFinal(any(Recording.class), anyString(),
                 speakerAudioCaptor.capture(), anyString());
         assertEquals(1, speakerAudioCaptor.getValue().size());
         assertEquals("discord-user-1", speakerAudioCaptor.getValue().get(0).speakerId());
+    }
+
+    @Test
+    void discordUserAudioGapsAreFilledWithSilenceBeforeTranscription() {
+        InMemoryRecordingRepository recordingRepository = new InMemoryRecordingRepository();
+        InMemoryChronicleRepository chronicleRepository = new InMemoryChronicleRepository();
+        chronicleRepository.save(new Chronicle("session-1", "Campaign Session", Instant.parse("2026-08-25T09:59:00Z"), null));
+        InMemoryAdventureRepository adventureRepository = new InMemoryAdventureRepository();
+        adventureRepository.save(new Adventure("adventure-1", "session-1", "Adventure One", AdventureStatus.ACTIVE,
+                Instant.parse("2026-08-25T09:59:00Z"), Instant.parse("2026-08-25T09:59:00Z"), null, de.urr4.rp.roleplayer.domain.model.WorldExtractionStatus.NONE, null));
+
+        AudioStore audioStore = mock(AudioStore.class);
+        when(audioStore.store(anyString(), any(byte[].class), anyString())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        RecordingProcessingService processingService = mock(RecordingProcessingService.class);
+        MutableClock clock = new MutableClock(Instant.parse("2026-08-25T10:00:00Z"));
+        bufferDirectory = Path.of("build", "test-live-recording-buffers", UUID.randomUUID().toString());
+
+        LiveRecordingBufferManager manager = new LiveRecordingBufferManager(recordingRepository, chronicleRepository,
+                adventureRepository, audioStore, processingService, clock, bufferDirectory);
+
+        Recording recording = manager.start("adventure-1", RecordingSource.DISCORD, "wav", "audio/wav", "de",
+                false, true, "discord-channel-1");
+        var sink = manager.createDiscordAudioSink(recording.id());
+
+        byte[] firstUtterance = new byte[]{1, 2, 3, 4};
+        sink.onUserAudio("discord-user-1", "Alice", firstUtterance);
+
+        // A real pause between two separate remarks (well above the
+        // continuous-speech Opus-frame cadence) - naively concatenating the
+        // next remark directly onto the first would give WhisperX no
+        // acoustic cue that these are two distinct, temporally distant
+        // utterances, which was blending sentence tails/starts together.
+        clock.advance(Duration.ofSeconds(1));
+        byte[] secondUtterance = new byte[]{5, 6, 7, 8};
+        sink.onUserAudio("discord-user-1", "Alice", secondUtterance);
+
+        clock.advance(Duration.ofSeconds(1));
+        manager.stop(recording.id());
+
+        ArgumentCaptor<List<SpeakerAudioDelta>> speakerAudioCaptor = ArgumentCaptor.forClass(List.class);
+        verify(processingService, times(1)).processDiscordFinal(any(Recording.class), anyString(),
+                speakerAudioCaptor.capture(), anyString());
+        // The final (WAV-wrapped) audio must be noticeably longer than the
+        // raw concatenation of both utterances - the extra bytes are the
+        // inserted silence gap, giving WhisperX a clear pause boundary.
+        int rawConcatenatedLength = firstUtterance.length + secondUtterance.length;
+        assertTrue(speakerAudioCaptor.getValue().get(0).audioBytes().length > rawConcatenatedLength + 40,
+                "Expected silence to be inserted for the gap between utterances");
     }
 
     private static final class RecordingRepositoryState {

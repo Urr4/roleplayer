@@ -123,31 +123,61 @@ class RecordingProcessingService {
         }
     }
 
+    // Matches the MediaRecorder timeslice configured on the frontend
+    // (recorder.start(10000)) - used only to approximate the *relative*
+    // start offset of each WebM chunk within a flush batch for transcript
+    // segment timestamps in the UI; it is not exact (chunk boundaries can
+    // land slightly earlier/later depending on encoder buffering) but is
+    // good enough for display purposes, consistent with the rest of this
+    // class's "approximate" duration/offset tracking.
+    private static final long WEBM_CHUNK_NOMINAL_DURATION_MS = 10_000;
+
     @Async("recordingTaskExecutor")
-    public void processLiveDelta(Recording recording, String sessionName, byte[] deltaBytes, long offsetMs,
-                                 Instant flushedAt, String language, boolean diarize, Object recordingLock,
-                                 Runnable onDeltaPersisted) {
+    public void processLiveWebmChunks(Recording recording, String sessionName, List<byte[]> chunkAudioBytes,
+                                      long baseOffsetMs, Instant flushedAt, String language, boolean diarize,
+                                      Object recordingLock, Runnable onChunksPersisted) {
         try {
-            if (deltaBytes.length > 0) {
-                transcriptionClient.transcribe(recording.id(), deltaBytes, language, diarize)
-                        .stream()
+            // Each pending chunk is transcribed on its own (rather than
+            // concatenated into a single call) since a lone MediaRecorder
+            // WebM chunk is already a complete, valid file, whereas several
+            // of them concatenated raw are not - see flushLocked in
+            // LiveRecordingBufferManager and WebmRemuxer for the full
+            // explanation of why this previously silently truncated
+            // transcription to just the first chunk of a recording.
+            // Segments are only saved/published once every chunk in this
+            // batch has transcribed successfully, so a failure partway
+            // through (e.g. the ASR host becomes unreachable) can be safely
+            // retried in full on the next flush without risking duplicated
+            // segments from chunks that already succeeded this attempt.
+            List<TranscriptSegment> pendingSegments = new ArrayList<>();
+            for (int i = 0; i < chunkAudioBytes.size(); i++) {
+                byte[] chunkBytes = chunkAudioBytes.get(i);
+                if (chunkBytes.length == 0) {
+                    continue;
+                }
+                long chunkOffsetMs = baseOffsetMs + (long) i * WEBM_CHUNK_NOMINAL_DURATION_MS;
+                transcriptionClient.transcribe(recording.id(), chunkBytes, language, diarize).stream()
                         .map(segment -> new TranscriptSegment(segment.id(), segment.recordingId(), segment.speakerLabel(),
-                                segment.startMs() + offsetMs, segment.endMs() + offsetMs, segment.text(),
+                                segment.startMs() + chunkOffsetMs, segment.endMs() + chunkOffsetMs, segment.text(),
                                 segment.createdAt()))
-                        .map(transcriptSegmentRepository::save)
-                        .forEach(segment -> transcriptEventPublisher.publish(recording.adventureId(), segment));
+                        .forEach(pendingSegments::add);
             }
 
+            List<TranscriptSegment> saved = pendingSegments.stream()
+                    .map(transcriptSegmentRepository::save)
+                    .toList();
+            saved.forEach(segment -> transcriptEventPublisher.publish(recording.adventureId(), segment));
+
             synchronized (recordingLock) {
-                if (deltaBytes.length > 0) {
-                    onDeltaPersisted.run();
+                if (!chunkAudioBytes.isEmpty()) {
+                    onChunksPersisted.run();
                 }
                 refreshTranscriptObject(recording, sessionName, flushedAt);
             }
         } catch (Exception e) {
-            log.warn("Failed to process live recording delta {}; transcription boundary left unchanged for retry",
-                    recording.id(), e);
-            throw new IllegalStateException("Failed to process live recording delta " + recording.id(), e);
+            log.warn("Failed to process live microphone recording chunks for {}; transcription boundary left"
+                    + " unchanged for retry", recording.id(), e);
+            throw new IllegalStateException("Failed to process live microphone recording chunks " + recording.id(), e);
         }
     }
 

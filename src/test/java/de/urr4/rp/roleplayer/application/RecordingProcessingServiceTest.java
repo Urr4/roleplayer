@@ -34,7 +34,7 @@ import static org.mockito.Mockito.when;
 class RecordingProcessingServiceTest {
 
     @Test
-    void processLiveDeltaLeavesBoundaryUnchangedWhenTranscriptionFails() {
+    void processLiveWebmChunksLeavesBoundaryUnchangedWhenTranscriptionFails() {
         AudioStore audioStore = mock(AudioStore.class);
         TranscriptStore transcriptStore = mock(TranscriptStore.class);
         TranscriptionClient transcriptionClient = mock(TranscriptionClient.class);
@@ -52,8 +52,8 @@ class RecordingProcessingServiceTest {
 
         AtomicInteger boundaryAdvanceCount = new AtomicInteger();
 
-        assertThrows(IllegalStateException.class, () -> service.processLiveDelta(recording, "Campaign Session",
-                new byte[]{1, 2, 3}, 0, Instant.parse("2026-08-25T10:05:00Z"), "de", true, new Object(),
+        assertThrows(IllegalStateException.class, () -> service.processLiveWebmChunks(recording, "Campaign Session",
+                List.of(new byte[]{1, 2, 3}), 0, Instant.parse("2026-08-25T10:05:00Z"), "de", true, new Object(),
                 boundaryAdvanceCount::incrementAndGet));
 
         assertEquals(0, boundaryAdvanceCount.get());
@@ -61,7 +61,7 @@ class RecordingProcessingServiceTest {
     }
 
     @Test
-    void processLiveDeltaSerializesTranscriptRefreshPerRecording() throws Exception {
+    void processLiveWebmChunksSerializesTranscriptRefreshPerRecording() throws Exception {
         AudioStore audioStore = mock(AudioStore.class);
         TranscriptionClient transcriptionClient = mock(TranscriptionClient.class);
         TranscriptEventPublisher transcriptEventPublisher = mock(TranscriptEventPublisher.class);
@@ -162,7 +162,7 @@ class RecordingProcessingServiceTest {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(e);
         }
-        service.processLiveDelta(recording, "Campaign Session", new byte[0], 0,
+        service.processLiveWebmChunks(recording, "Campaign Session", List.of(), 0,
                 Instant.parse("2026-08-25T10:05:00Z"), "de", true, recordingLock, () -> {
                 });
     }

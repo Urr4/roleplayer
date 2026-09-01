@@ -27,7 +27,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -133,12 +132,13 @@ public class LiveRecordingBufferManager {
             appendBytes(buffer.audioBufferPath(), chunkBytes, recordingId);
             // For WebM sources (microphone), each MediaRecorder chunk is a
             // self-contained WebM segment with its own header - raw byte
-            // concatenation (above, still used for transcription delta
-            // offsets) does not produce a valid multi-segment WebM file. Keep
-            // every chunk as its own file too so the final stored audio can
-            // be stitched together with ffmpeg's concat demuxer, which is the
-            // only reliable way to get correct duration/seek metadata - see
-            // WebmRemuxer for details.
+            // concatenation (above, only kept around for hasBufferedAudio()
+            // bookkeeping) does not produce a valid multi-segment WebM file.
+            // Keep every chunk as its own file too so (a) the final stored
+            // audio can be stitched together with ffmpeg's concat demuxer,
+            // which is the only reliable way to get correct duration/seek
+            // metadata, and (b) each chunk can be transcribed individually -
+            // see WebmRemuxer and flushLocked for details.
             if ("webm".equalsIgnoreCase(buffer.fileExtension()) && chunkBytes != null && chunkBytes.length > 0) {
                 Path chunkPath = createWebmChunkFile(recordingId, buffer.nextChunkIndex());
                 writeBytes(chunkPath, chunkBytes, recordingId);
@@ -186,9 +186,22 @@ public class LiveRecordingBufferManager {
                 // garbled half-sentences by transcribing audio chunks that
                 // were cut mid-utterance. Doing it in one pass over each
                 // speaker's complete audio lets WhisperX see full sentences.
-                Recording processingRecording = saveRecording(flushResult.recording(), RecordingStatus.PROCESSING, endedAt);
                 Chronicle chronicle = chronicleRepository.findById(recording.chronicleId())
                         .orElseThrow(() -> new NoSuchElementException("Chronicle not found: " + recording.chronicleId()));
+                Recording flushedRecording = flushResult.recording();
+                // Live recordings never get a transcriptObjectKey at
+                // creation (unlike uploads, which pre-generate one) - it
+                // stays null until the first transcript is actually stored.
+                // Passing that null straight through to the object store as
+                // the storage key throws ("Parameter 'Key' must not be
+                // null"), which is what made every Discord recording end up
+                // FAILED. Generate a real key upfront, same as uploads do.
+                String transcriptObjectKey = RecordingKeyFactory.create(chronicle.name(), flushedRecording.startedAt(),
+                        endedAt, "json");
+                Recording processingRecording = recordingRepository.save(new Recording(flushedRecording.id(),
+                        flushedRecording.chronicleId(), flushedRecording.adventureId(), flushedRecording.source(),
+                        RecordingStatus.PROCESSING, flushedRecording.startedAt(), endedAt, flushedRecording.audioObjectKey(),
+                        transcriptObjectKey));
                 List<SpeakerAudioDelta> fullSpeakerAudio = buffer.collectFullSpeakerAudio(recordingId);
                 recordingProcessingService.processDiscordFinal(processingRecording, chronicle.name(), fullSpeakerAudio,
                         buffer.language());
@@ -312,9 +325,25 @@ public class LiveRecordingBufferManager {
             if (!buffer.isCaptureEnabled()) {
                 return;
             }
+            Instant now = Instant.now(clock);
             Path userBufferPath = buffer.userBufferPath(discordUserId, bufferDirectory);
+            // JDA only calls onUserAudio while that user's Opus audio is
+            // actually flowing, so a real multi-second/minute pause between
+            // two unrelated remarks would otherwise leave zero trace in this
+            // per-user buffer - butting the next remark's audio directly
+            // onto the end of the previous one gives WhisperX no acoustic
+            // cue that these are two separate, temporally distant
+            // utterances, and it was blending the tail of one sentence into
+            // the start of a much later one at that boundary (a likely
+            // cause of the reported inaccurate/garbled Discord
+            // transcriptions). Re-insert a bounded amount of silence for any
+            // real gap so WhisperX's own segmentation sees a clear pause.
+            byte[] silence = buffer.silenceBytesForGap(discordUserId, now);
+            if (silence.length > 0) {
+                appendBytes(userBufferPath, silence, recordingId);
+            }
             appendBytes(userBufferPath, pcmBytes, recordingId);
-            buffer.markUserChunkWritten(discordUserId, discordDisplayName, userBufferPath, Instant.now(clock));
+            buffer.markUserChunkWritten(discordUserId, discordDisplayName, userBufferPath, now);
         }
     }
 
@@ -350,17 +379,34 @@ public class LiveRecordingBufferManager {
             // only needs to (re)upload the accumulated combined audio to
             // S3/MinIO so nothing is lost if the process crashes mid-session.
         } else {
+            // Microphone (WebM): each MediaRecorder timeslice chunk is a
+            // complete, self-contained WebM file on its own (its own
+            // EBML/WebM header). Previously this branch transcribed a raw
+            // byte-range slice of the flat, append-only buffer, which - once
+            // that range spanned more than one chunk - is just several whole
+            // WebM files concatenated back to back with no remuxing. Exactly
+            // like the browser playback problem WebmRemuxer works around,
+            // WhisperX's own decoder only reads the *first* embedded header
+            // it finds and silently stops there, so only the very first
+            // chunk (~10s) of a longer recording was ever actually
+            // transcribed no matter how long the user spoke, and the
+            // remainder was dropped. Transcribing each pending chunk file
+            // individually sidesteps this entirely, since a lone chunk is
+            // already valid on its own - see WebmRemuxer for more detail on
+            // the underlying multi-segment WebM limitation.
             long approximateOffsetMs = buffer.lastTranscribedApproximateMs();
             long approximateDurationMs = buffer.approximateRecordedDurationMsAt(flushedAt);
-            long deltaStart = buffer.lastTranscribedOffset();
-            if (deltaStart < 0 || deltaStart > fullBufferBytes.length) {
-                throw new IllegalStateException("Invalid transcription offset for recording " + recording.id());
-            }
-            byte[] deltaBytes = Arrays.copyOfRange(fullBufferBytes, Math.toIntExact(deltaStart), fullBufferBytes.length);
-            recordingProcessingService.processLiveDelta(updatedRecording, chronicle.name(), deltaBytes, approximateOffsetMs,
-                    flushedAt, buffer.language(), buffer.diarize(), buffer, () -> {
-                        if (deltaBytes.length > 0) {
-                            buffer.advanceTranscriptionBoundary(fullBufferBytes.length, approximateDurationMs);
+            List<Path> pendingChunkFiles = buffer.pendingWebmChunkFiles();
+            List<byte[]> pendingChunkAudio = pendingChunkFiles.stream()
+                    .map(chunkPath -> readAllBytes(chunkPath, recording.id()))
+                    .filter(bytes -> bytes.length > 0)
+                    .toList();
+            int pendingChunkCount = pendingChunkFiles.size();
+            recordingProcessingService.processLiveWebmChunks(updatedRecording, chronicle.name(), pendingChunkAudio,
+                    approximateOffsetMs, flushedAt, buffer.language(), buffer.diarize(), buffer, () -> {
+                        if (pendingChunkCount > 0) {
+                            buffer.markWebmChunksTranscribed(pendingChunkCount);
+                            buffer.advanceTranscriptionBoundary(approximateDurationMs);
                         }
                     });
         }
@@ -503,12 +549,16 @@ public class LiveRecordingBufferManager {
         // only) - see WebmRemuxer for why these must be kept as separate
         // files rather than only relying on the flat append-only buffer.
         private final List<Path> webmChunkFiles = new ArrayList<>();
+        // How many chunks (from the front of webmChunkFiles) have already
+        // been sent to WhisperX for transcription - see flushLocked/
+        // pendingWebmChunkFiles for why each chunk is transcribed
+        // individually rather than as one combined blob.
+        private int transcribedChunkCount;
         private int nextChunkIndex;
         private Instant firstChunkAt;
         private Instant lastChunkAt;
         private Instant activeSince;
         private Instant lastFlushedAt;
-        private long lastTranscribedOffset;
         private long lastTranscribedApproximateMs;
         private long accumulatedRecordedMs;
         private boolean captureEnabled = true;
@@ -545,6 +595,24 @@ public class LiveRecordingBufferManager {
             webmChunkFiles.add(chunkPath);
         }
 
+        /**
+         * Returns the WebM chunk files (in order) that have not yet been
+         * transcribed. Each of these is a complete, self-contained WebM file
+         * on its own and should be transcribed individually - see
+         * flushLocked for why concatenating several of them into one blob
+         * silently truncates transcription to just the first chunk.
+         */
+        private List<Path> pendingWebmChunkFiles() {
+            return transcribedChunkCount >= webmChunkFiles.size()
+                    ? List.of()
+                    : List.copyOf(webmChunkFiles.subList(transcribedChunkCount, webmChunkFiles.size()));
+        }
+
+        private void markWebmChunksTranscribed(int count) {
+            transcribedChunkCount += count;
+        }
+
+
         private String fileExtension() {
             return fileExtension;
         }
@@ -569,10 +637,6 @@ public class LiveRecordingBufferManager {
             return discordChannelId;
         }
 
-        private long lastTranscribedOffset() {
-            return lastTranscribedOffset;
-        }
-
         private long lastTranscribedApproximateMs() {
             return lastTranscribedApproximateMs;
         }
@@ -595,8 +659,28 @@ public class LiveRecordingBufferManager {
             discordUserBuffers.compute(discordUserId, (userId, existing) -> {
                 DiscordUserBuffer buffer = existing == null ? new DiscordUserBuffer(bufferPath) : existing;
                 buffer.updateSpeakerLabel(discordDisplayName);
+                buffer.markAudioAt(now);
                 return buffer;
             });
+        }
+
+        private static final int PCM_BYTES_PER_SECOND = 48_000 * 2 /* channels */ * 2 /* bytes per 16-bit sample */;
+        private static final Duration MIN_GAP_TO_FILL_WITH_SILENCE = Duration.ofMillis(400);
+        private static final Duration MAX_INSERTED_SILENCE = Duration.ofSeconds(2);
+
+        private byte[] silenceBytesForGap(String discordUserId, Instant now) {
+            DiscordUserBuffer userBuffer = discordUserBuffers.get(discordUserId);
+            if (userBuffer == null || userBuffer.lastAudioAt() == null) {
+                return new byte[0];
+            }
+            Duration gap = Duration.between(userBuffer.lastAudioAt(), now);
+            if (gap.compareTo(MIN_GAP_TO_FILL_WITH_SILENCE) < 0) {
+                return new byte[0];
+            }
+            Duration cappedGap = gap.compareTo(MAX_INSERTED_SILENCE) > 0 ? MAX_INSERTED_SILENCE : gap;
+            long silenceByteCount = cappedGap.toMillis() * PCM_BYTES_PER_SECOND / 1000;
+            silenceByteCount -= silenceByteCount % 4; // whole 16-bit stereo samples only
+            return silenceByteCount > 0 ? new byte[(int) silenceByteCount] : new byte[0];
         }
 
         private void prepareForResume() {
@@ -620,8 +704,7 @@ public class LiveRecordingBufferManager {
             return recordedMs;
         }
 
-        private void advanceTranscriptionBoundary(long newOffset, long approximateDurationMs) {
-            lastTranscribedOffset = newOffset;
+        private void advanceTranscriptionBoundary(long approximateDurationMs) {
             lastTranscribedApproximateMs = approximateDurationMs;
         }
 
@@ -706,6 +789,7 @@ public class LiveRecordingBufferManager {
 
         private final Path bufferPath;
         private String speakerLabel = "UNKNOWN";
+        private Instant lastAudioAt;
 
         private DiscordUserBuffer(Path bufferPath) {
             this.bufferPath = bufferPath;
@@ -717,6 +801,14 @@ public class LiveRecordingBufferManager {
 
         private String speakerLabel() {
             return speakerLabel;
+        }
+
+        private Instant lastAudioAt() {
+            return lastAudioAt;
+        }
+
+        private void markAudioAt(Instant now) {
+            lastAudioAt = now;
         }
 
         private void updateSpeakerLabel(String newSpeakerLabel) {

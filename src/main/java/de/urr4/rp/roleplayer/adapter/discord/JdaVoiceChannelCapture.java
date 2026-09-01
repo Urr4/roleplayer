@@ -103,7 +103,16 @@ public class JdaVoiceChannelCapture implements VoiceChannelCapture {
             }
         };
 
-        ActiveCapture previousCapture = activeCaptures.put(recordingId, new ActiveCapture(guild, audioManager, handler));
+        // Set by leave() right before it tears the connection down on
+        // purpose (recording stopped/paused-out cleanly). closeAudioConnection()
+        // asynchronously drives the exact same ConnectionListener status
+        // transition (typically NOT_CONNECTED) as an unexpected disconnect
+        // would - without this flag, a perfectly normal stop() would race
+        // with that async status callback and get its recording flipped from
+        // DONE back to FAILED shortly after (see reportConnectionLost below).
+        AtomicBoolean intentionalLeave = new AtomicBoolean(false);
+        ActiveCapture previousCapture = activeCaptures.put(recordingId,
+                new ActiveCapture(guild, audioManager, handler, intentionalLeave));
         if (previousCapture != null) {
             previousCapture.close();
         }
@@ -155,6 +164,14 @@ public class JdaVoiceChannelCapture implements VoiceChannelCapture {
                 }
                 if (status.name().startsWith("CONNECTING_")) {
                     // A reconnect attempt after having been connected before; still transient.
+                    return;
+                }
+                if (intentionalLeave.get()) {
+                    // This status change is simply the (expected) consequence
+                    // of an intentional leave() call from stop()/pause() -
+                    // not an unexpected disconnect. Reporting it as
+                    // "connection lost" here would race with - and clobber -
+                    // the DONE status a clean stop() already saved.
                     return;
                 }
                 log.warn("Discord voice connection for recording {} in channel {} entered a disconnect/error"
@@ -224,6 +241,7 @@ public class JdaVoiceChannelCapture implements VoiceChannelCapture {
     public void leave(String recordingId) {
         ActiveCapture capture = activeCaptures.remove(recordingId);
         if (capture != null) {
+            capture.intentionalLeave().set(true);
             capture.close();
         }
     }
@@ -257,7 +275,8 @@ public class JdaVoiceChannelCapture implements VoiceChannelCapture {
         channel.sendMessage(text).queue();
     }
 
-    private record ActiveCapture(Guild guild, AudioManager audioManager, AudioReceiveHandler handler) {
+    private record ActiveCapture(Guild guild, AudioManager audioManager, AudioReceiveHandler handler,
+                                  AtomicBoolean intentionalLeave) {
         private void close() {
             audioManager.setReceivingHandler(null);
             audioManager.closeAudioConnection();

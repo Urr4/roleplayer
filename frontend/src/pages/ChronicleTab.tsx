@@ -13,7 +13,6 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
-  FormControlLabel,
   Grid,
   IconButton,
   List,
@@ -21,7 +20,6 @@ import {
   ListItemButton,
   ListItemText,
   Stack,
-  Switch,
   TextField,
   Tooltip,
   Typography,
@@ -170,7 +168,6 @@ export default function ChronicleTab({
   const [discordChannels, setDiscordChannels] = useState<DiscordVoiceChannelDto[]>([]);
   const [discordChannelsLoading, setDiscordChannelsLoading] = useState(false);
   const [selectedDiscordChannel, setSelectedDiscordChannel] = useState<DiscordVoiceChannelDto | null>(null);
-  const [writeTranscriptToChat, setWriteTranscriptToChat] = useState(false);
   const [discordConfirmOpen, setDiscordConfirmOpen] = useState(false);
   const [liveRecording, setLiveRecording] = useState<RecordingDto | null>(null);
   const [liveRecordingAdventureId, setLiveRecordingAdventureId] = useState<string | null>(null);
@@ -652,7 +649,7 @@ export default function ChronicleTab({
 
     setRecordingBusy(true);
     try {
-      const recording = await startRecording(adventureId, 'DISCORD', selectedDiscordChannel.id, writeTranscriptToChat);
+      const recording = await startRecording(adventureId, 'DISCORD', selectedDiscordChannel.id);
       setLiveRecording(recording);
       setLiveRecordingAdventureId(adventureId);
       setRecordDialogOpen(false);
@@ -670,7 +667,23 @@ export default function ChronicleTab({
     setRecordingBusy(true);
     try {
       if (liveRecording.status === 'RECORDING') {
-        mediaRecorderRef.current?.pause();
+        const recorder = mediaRecorderRef.current;
+        if (recorder && recorder.state === 'recording') {
+          // MediaRecorder.pause() does not emit a dataavailable event, so
+          // whatever audio has been captured since the last automatic
+          // 10s timeslice tick would otherwise be silently dropped from the
+          // final stored file every time the recording is paused (this is
+          // what made playback duration end up shorter than the actual
+          // recorded time). requestData() forces an immediate flush of that
+          // pending audio before we actually pause and upload it like any
+          // other chunk.
+          await new Promise<void>(resolve => {
+            recorder.addEventListener('dataavailable', () => resolve(), { once: true });
+            recorder.requestData();
+          });
+          await Promise.all(pendingChunkUploadsRef.current);
+          recorder.pause();
+        }
         const updated = await pauseRecording(liveRecordingAdventureId, liveRecording.id);
         setLiveRecording(updated);
       } else {
@@ -738,7 +751,6 @@ export default function ChronicleTab({
     setSelectedDiscordGuild(null);
     setDiscordChannels([]);
     setSelectedDiscordChannel(null);
-    setWriteTranscriptToChat(false);
     setDiscordConfirmOpen(false);
   }, []);
 
@@ -1503,15 +1515,6 @@ export default function ChronicleTab({
               onChange={(_, channel) => setSelectedDiscordChannel(channel)}
               renderInput={params => <TextField {...params} label="Voice channel" size="small" />}
               noOptionsText={discordChannelsLoading ? 'Loading…' : 'No occupied voice channels'}
-            />
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={writeTranscriptToChat}
-                  onChange={event => setWriteTranscriptToChat(event.target.checked)}
-                />
-              }
-              label="Write transcript to chat?"
             />
             <Button
               variant="outlined"

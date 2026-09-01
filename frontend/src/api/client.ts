@@ -124,17 +124,11 @@ export const uploadRecording = (adventureId: string, file: File) => {
   return api.post<RecordingDto>(`/adventures/${adventureId}/recordings`, form).then(r => r.data);
 };
 
-export const startRecording = (
-  adventureId: string,
-  source: RecordingSource,
-  discordChannelId?: string,
-  writeTranscriptToChat?: boolean,
-) =>
+export const startRecording = (adventureId: string, source: RecordingSource, discordChannelId?: string) =>
   api
     .post<RecordingDto>(`/adventures/${adventureId}/recordings/start`, {
       source,
       discordChannelId,
-      writeTranscriptToChat,
     })
     .then(r => r.data);
 

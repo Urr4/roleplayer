@@ -187,63 +187,7 @@ class LiveRecordingBufferManagerTest {
     }
 
     @Test
-    void refreshDiscordLiveTranscriptsPostsNewSpeechOnFastCadenceIndependentOfAudioFlush() {
-        InMemoryRecordingRepository recordingRepository = new InMemoryRecordingRepository();
-        InMemoryChronicleRepository chronicleRepository = new InMemoryChronicleRepository();
-        chronicleRepository.save(new Chronicle("session-1", "Campaign Session", Instant.parse("2026-08-25T09:59:00Z"), null));
-        InMemoryAdventureRepository adventureRepository = new InMemoryAdventureRepository();
-        adventureRepository.save(new Adventure("adventure-1", "session-1", "Adventure One", AdventureStatus.ACTIVE,
-                Instant.parse("2026-08-25T09:59:00Z"), Instant.parse("2026-08-25T09:59:00Z"), null, de.urr4.rp.roleplayer.domain.model.WorldExtractionStatus.NONE, null));
-
-        AudioStore audioStore = mock(AudioStore.class);
-        when(audioStore.store(anyString(), any(byte[].class), anyString())).thenAnswer(invocation -> invocation.getArgument(0));
-
-        RecordingProcessingService processingService = mock(RecordingProcessingService.class);
-        org.mockito.Mockito.doAnswer(invocation -> {
-            invocation.getArgument(9, Runnable.class).run();
-            return null;
-        }).when(processingService).processDiscordLiveDelta(any(Recording.class), anyString(), any(List.class),
-                anyLong(), any(Instant.class), anyString(), anyString(), anyBoolean(), any(Object.class), any(Runnable.class));
-        MutableClock clock = new MutableClock(Instant.parse("2026-08-25T10:00:00Z"));
-        bufferDirectory = Path.of("build", "test-live-recording-buffers", UUID.randomUUID().toString());
-
-        LiveRecordingBufferManager manager = new LiveRecordingBufferManager(recordingRepository, chronicleRepository,
-                adventureRepository, audioStore, processingService, clock, bufferDirectory);
-
-        Recording recording = manager.start("adventure-1", RecordingSource.DISCORD, "wav", "audio/wav", "de",
-                false, true, "discord-channel-1", true);
-
-        // No speech captured yet: the fast cadence must be a no-op.
-        manager.refreshDiscordLiveTranscriptsDue();
-        verify(processingService, never()).processDiscordLiveDelta(any(Recording.class), anyString(), any(List.class),
-                anyLong(), any(Instant.class), anyString(), anyString(), anyBoolean(), any(Object.class), any(Runnable.class));
-
-        var sink = manager.createDiscordAudioSink(recording.id());
-        sink.onUserAudio("discord-user-1", "Alice", new byte[]{1, 2, 3, 4});
-
-        clock.advance(Duration.ofSeconds(5));
-        manager.refreshDiscordLiveTranscriptsDue();
-
-        ArgumentCaptor<List<SpeakerAudioDelta>> deltasCaptor = ArgumentCaptor.forClass(List.class);
-        verify(processingService, times(1)).processDiscordLiveDelta(any(Recording.class), anyString(), deltasCaptor.capture(),
-                anyLong(), any(Instant.class), anyString(), anyString(), anyBoolean(), any(Object.class), any(Runnable.class));
-        assertEquals(1, deltasCaptor.getValue().size());
-        assertEquals("discord-user-1", deltasCaptor.getValue().get(0).speakerId());
-
-        // Calling again immediately (no new speech since last call) must not
-        // re-transcribe/re-post the same audio.
-        manager.refreshDiscordLiveTranscriptsDue();
-        verify(processingService, times(1)).processDiscordLiveDelta(any(Recording.class), anyString(), any(List.class),
-                anyLong(), any(Instant.class), anyString(), anyString(), anyBoolean(), any(Object.class), any(Runnable.class));
-
-        // The audio-store upload (S3/MinIO), by contrast, only happens when
-        // the recording is stopped/paused/manually flushed - not on every
-        // fast chat-transcript tick.
-        verify(audioStore, never()).store(anyString(), any(byte[].class), anyString());
-    }
-
-    @Test
-    void refreshDiscordLiveTranscriptsSkipsPausedRecordings() {
+    void stopDiscordRecordingTranscribesEachSpeakersFullBufferedAudioOnce() {
         InMemoryRecordingRepository recordingRepository = new InMemoryRecordingRepository();
         InMemoryChronicleRepository chronicleRepository = new InMemoryChronicleRepository();
         chronicleRepository.save(new Chronicle("session-1", "Campaign Session", Instant.parse("2026-08-25T09:59:00Z"), null));
@@ -262,19 +206,27 @@ class LiveRecordingBufferManagerTest {
                 adventureRepository, audioStore, processingService, clock, bufferDirectory);
 
         Recording recording = manager.start("adventure-1", RecordingSource.DISCORD, "wav", "audio/wav", "de",
-                false, true, "discord-channel-1", true);
+                false, true, "discord-channel-1");
+
+        // Nothing should be transcribed yet while still recording - Discord
+        // audio is only ever transcribed once, at stop() time (fast
+        // incremental transcription previously produced garbled
+        // half-sentences by cutting utterances mid-tick).
         var sink = manager.createDiscordAudioSink(recording.id());
         sink.onUserAudio("discord-user-1", "Alice", new byte[]{1, 2, 3, 4});
+        clock.advance(Duration.ofSeconds(5));
+        manager.flushRecordingsDue();
+        verify(processingService, never()).processDiscordFinal(any(Recording.class), anyString(), any(List.class), anyString());
 
         clock.advance(Duration.ofSeconds(5));
-        manager.pause(recording.id());
+        Recording stopped = manager.stop(recording.id());
+        assertEquals(de.urr4.rp.roleplayer.domain.model.RecordingStatus.PROCESSING, stopped.status());
 
-        manager.refreshDiscordLiveTranscriptsDue();
-
-        // The pause() call itself flushes any pending speech (processDiscordLiveDelta
-        // invoked once there); the fast cadence must not run again while paused.
-        verify(processingService, times(1)).processDiscordLiveDelta(any(Recording.class), anyString(), any(List.class),
-                anyLong(), any(Instant.class), anyString(), anyString(), anyBoolean(), any(Object.class), any(Runnable.class));
+        ArgumentCaptor<List<SpeakerAudioDelta>> speakerAudioCaptor = ArgumentCaptor.forClass(List.class);
+        verify(processingService, times(1)).processDiscordFinal(any(Recording.class), anyString(),
+                speakerAudioCaptor.capture(), anyString());
+        assertEquals(1, speakerAudioCaptor.getValue().size());
+        assertEquals("discord-user-1", speakerAudioCaptor.getValue().get(0).speakerId());
     }
 
     private static final class RecordingRepositoryState {

@@ -78,12 +78,27 @@ public class WorldFactExtractionService {
             log.info("Skipping world extraction for adventure {} because world {} is missing", adventure.id(), chronicle.worldId());
             return;
         }
+        if (recordingService.listRecordings(adventure.id()).isEmpty()) {
+            log.info("Skipping world extraction for adventure {} because it has no recordings", adventure.id());
+            return;
+        }
         String transcriptText = recordingService.getAdventureTranscript(adventure.id()).stream()
                 .map(this::formatSegment)
                 .reduce((a, b) -> a + "\n" + b)
                 .orElse("");
         if (transcriptText.isBlank()) {
-            log.info("Skipping world extraction for adventure {} because transcript is empty", adventure.id());
+            // The adventure has recordings, but no transcript segments exist
+            // yet - most likely because the final live-recording flush's ASR
+            // call runs asynchronously (see RecordingProcessingService) and
+            // can still be in flight when the adventure is marked stopped, or
+            // a just-uploaded recording is still waiting on WhisperX/queued
+            // for retry. This is transient, not permanent: mark PENDING so
+            // WorldFactRetryScheduler keeps retrying every couple of minutes
+            // once transcript segments actually show up, instead of silently
+            // and permanently skipping extraction (and the Obsidian push
+            // that depends on it) for good.
+            log.info("Transcript not ready yet for adventure {}; marking world extraction pending for retry", adventure.id());
+            saveStatus(adventure, WorldExtractionStatus.PENDING, null);
             return;
         }
         Adventure pending = adventure;

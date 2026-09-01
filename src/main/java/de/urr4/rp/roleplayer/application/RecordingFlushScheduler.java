@@ -16,9 +16,4 @@ public class RecordingFlushScheduler {
     public void flushRecordings() {
         liveRecordingBufferManager.flushRecordingsDue();
     }
-
-    @Scheduled(fixedDelay = 5_000)
-    public void refreshDiscordLiveTranscripts() {
-        liveRecordingBufferManager.refreshDiscordLiveTranscriptsDue();
-    }
 }

@@ -88,8 +88,7 @@ public class RecordingService {
         return savedRecording;
     }
 
-    public Recording startLiveRecording(String adventureId, RecordingSource source, String discordChannelId,
-                                        boolean writeTranscriptToChat) {
+    public Recording startLiveRecording(String adventureId, RecordingSource source, String discordChannelId) {
         if (source == RecordingSource.MICROPHONE) {
             return liveRecordingBufferManager.start(adventureId, source, MICROPHONE_RECORDING_EXTENSION,
                     MICROPHONE_RECORDING_CONTENT_TYPE, TRANSCRIPTION_LANGUAGE, true, false);
@@ -105,8 +104,7 @@ public class RecordingService {
                 .orElseThrow(() -> new IllegalStateException("Discord bot is not configured"));
         String trimmedChannelId = discordChannelId.trim();
         Recording recording = liveRecordingBufferManager.start(adventureId, source, DISCORD_RECORDING_EXTENSION,
-                DISCORD_RECORDING_CONTENT_TYPE, TRANSCRIPTION_LANGUAGE, false, true, trimmedChannelId,
-                writeTranscriptToChat);
+                DISCORD_RECORDING_CONTENT_TYPE, TRANSCRIPTION_LANGUAGE, false, true, trimmedChannelId);
         try {
             capture.joinAndCapture(recording.id(), trimmedChannelId,
                     liveRecordingBufferManager.createDiscordAudioSink(recording.id()),

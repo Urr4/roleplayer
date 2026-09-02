@@ -40,7 +40,7 @@ public class AdventureService {
                 .orElseThrow(() -> new NoSuchElementException("Chronicle not found: " + chronicleId));
         Adventure adventure = new Adventure(
                 UUID.randomUUID().toString(), chronicleId, name, AdventureStatus.PLANNED, Instant.now(), null, null,
-                WorldExtractionStatus.NONE, null);
+                WorldExtractionStatus.NONE, null, null);
         return adventureRepository.save(adventure);
     }
 
@@ -74,7 +74,8 @@ public class AdventureService {
         Instant startedAt = adventure.startedAt() == null ? Instant.now() : adventure.startedAt();
         Adventure started = new Adventure(
                 adventure.id(), adventure.chronicleId(), adventure.name(), AdventureStatus.ACTIVE,
-                adventure.createdAt(), startedAt, null, adventure.worldExtractionStatus(), adventure.worldExtractionError());
+                adventure.createdAt(), startedAt, null, adventure.worldExtractionStatus(), adventure.worldExtractionError(),
+                adventure.draftFactsText());
         return adventureRepository.save(started);
     }
 
@@ -83,10 +84,21 @@ public class AdventureService {
                 .orElseThrow(() -> new NoSuchElementException("Adventure not found: " + id));
         Adventure stopped = new Adventure(
                 adventure.id(), adventure.chronicleId(), adventure.name(), AdventureStatus.COMPLETED,
-                adventure.createdAt(), adventure.startedAt(), Instant.now(), adventure.worldExtractionStatus(), adventure.worldExtractionError());
+                adventure.createdAt(), adventure.startedAt(), Instant.now(), adventure.worldExtractionStatus(), adventure.worldExtractionError(),
+                adventure.draftFactsText());
         Adventure saved = adventureRepository.save(stopped);
         worldFactExtractionService.onAdventureStopped(saved);
         return saved;
+    }
+
+    /**
+     * Phase 2 of the world-facts flow: takes the (possibly user-edited) facts
+     * text and asks the LLM to merge it into the Obsidian vault as Markdown.
+     * Triggered explicitly by the "Add facts to world" button - never
+     * automatically retried in the background.
+     */
+    public Adventure pushWorldFacts(String id, String factsText) {
+        return worldFactExtractionService.pushFactsToVault(id, factsText);
     }
 
     @Transactional

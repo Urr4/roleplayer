@@ -62,19 +62,39 @@ public class OllamaWorldBuildingClient implements WorldBuildingClient {
     }
 
     @Override
-    public List<VaultNoteChange> extractFacts(String worldName, String worldSlug, String chronicleName,
-                                              String adventureName, String transcriptText,
-                                              List<String> existingNoteSummaries) {
+    public String summarizeFacts(String worldName, String worldSlug, String chronicleName, String adventureName,
+                                 String transcriptText) {
         OllamaGenerateResponse response = restClient.post()
                 .uri("/api/generate")
                 .body(Map.of(
                         "model", model,
-                        "prompt", buildPrompt(worldName, worldSlug, chronicleName, adventureName, transcriptText, existingNoteSummaries),
+                        "prompt", buildSummarizePrompt(worldName, chronicleName, adventureName, transcriptText),
                         "stream", false
                 ))
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, (request, clientResponse) -> {
-                    throw new IllegalStateException("Ollama world extraction failed with HTTP " + clientResponse.getStatusCode().value());
+                    throw new IllegalStateException("Ollama world-fact summarization failed with HTTP " + clientResponse.getStatusCode().value());
+                })
+                .body(OllamaGenerateResponse.class);
+        if (response == null || response.response() == null || response.response().isBlank()) {
+            throw new IllegalStateException("Ollama returned no world-fact summary");
+        }
+        return response.response().trim();
+    }
+
+    @Override
+    public List<VaultNoteChange> mergeFactsIntoVault(String worldName, String worldSlug, String chronicleName, String adventureName,
+                                                      String factsText, List<String> existingNoteSummaries) {
+        OllamaGenerateResponse response = restClient.post()
+                .uri("/api/generate")
+                .body(Map.of(
+                        "model", model,
+                        "prompt", buildMergePrompt(worldName, worldSlug, chronicleName, adventureName, factsText, existingNoteSummaries),
+                        "stream", false
+                ))
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, (request, clientResponse) -> {
+                    throw new IllegalStateException("Ollama vault merge failed with HTTP " + clientResponse.getStatusCode().value());
                 })
                 .body(OllamaGenerateResponse.class);
         if (response == null || response.response() == null || response.response().isBlank()) {
@@ -108,14 +128,44 @@ public class OllamaWorldBuildingClient implements WorldBuildingClient {
         return valid;
     }
 
-    private String buildPrompt(String worldName, String worldSlug, String chronicleName, String adventureName,
-                               String transcriptText, List<String> existingNoteSummaries) {
+    private String buildSummarizePrompt(String worldName, String chronicleName, String adventureName, String transcriptText) {
+        return """
+                Du bist ein Worldbuilding-Assistent für ein Pen-and-Paper-Rollenspiel.
+                Lies das folgende Abenteuer-Transkript und fasse die erkannten Fakten über
+                Charaktere, NPCs, die Welt, Kultur, Politik, Orte und Ereignisse in einem
+                einzigen zusammenhängenden Fließtext zusammen (kein Markdown, keine
+                Aufteilung in Dateien, keine JSON-Struktur).
+
+                Regeln:
+                - Schreibe in normalem Deutsch, in klaren Absätzen pro Thema (z.B. Charaktere,
+                  NPCs, Orte, Kultur/Politik, Ereignisse).
+                - Nur belastbare Fakten aus dem Transkript, keine Spekulationen.
+                - Der Text wird anschließend von einem Menschen redigiert (z.B. um Namen zu
+                  korrigieren), bevor er weiterverarbeitet wird - schreibe daher so, dass er
+                  gut lesbar und leicht editierbar ist.
+                - Wenn nichts Relevantes im Transkript steht, antworte mit einem kurzen Hinweis
+                  darauf statt mit erfundenen Inhalten.
+
+                Welt: %s
+                Chronik: %s
+                Abenteuer: %s
+
+                Transkript:
+                %s
+                """.formatted(worldName, chronicleName, adventureName, transcriptText);
+    }
+
+    private String buildMergePrompt(String worldName, String worldSlug, String chronicleName, String adventureName,
+                                    String factsText, List<String> existingNoteSummaries) {
         String summaries = existingNoteSummaries == null || existingNoteSummaries.isEmpty()
                 ? "Keine bestehenden Notizen."
                 : String.join("\n---\n", existingNoteSummaries);
         return """
                 Du bist ein Worldbuilding-Assistent für ein Pen-and-Paper-Rollenspiel.
-                Analysiere das folgende Abenteuer-Transkript und extrahiere nur belastbare Weltfakten.
+                Der folgende Text enthält vom Spielleiter geprüfte und ggf. korrigierte
+                Weltfakten (Charaktere, NPCs, Welt, Kultur, Politik, ...) aus einem Abenteuer.
+                Wandle ihn in Obsidian-Markdown-Notizen um und merge ihn mit den bestehenden
+                Notizen dieser Welt.
                 Antworte AUSSCHLIESSLICH mit STRICT JSON, ohne Markdown-Fences, ohne Einleitung, ohne Kommentar.
                 Format: ein JSON-Array von Objekten mit den Feldern
                 {"path":"...","title":"...","action":"create"|"update","content":"..."}
@@ -126,7 +176,7 @@ public class OllamaWorldBuildingClient implements WorldBuildingClient {
                 - Nutze sinnvolle Unterordner wie Locations/, People/, Events/, Culture/
                 - content muss gültiges Obsidian-Markdown sein
                 - Wikilinks nur auf andere Notizen derselben Welt
-                - Keine Spekulationen; nur Fakten aus dem Transkript
+                - Übernimm nur, was im Fakten-Text steht; keine Spekulationen
                 - Wenn nichts Relevantes vorhanden ist, antworte mit []
 
                 Chronik: %s
@@ -135,9 +185,9 @@ public class OllamaWorldBuildingClient implements WorldBuildingClient {
                 Bestehende Notiz-Zusammenfassungen:
                 %s
 
-                Transkript:
+                Geprüfter Fakten-Text:
                 %s
-                """.formatted(worldName, worldSlug, chronicleName, adventureName, summaries, transcriptText);
+                """.formatted(worldName, worldSlug, chronicleName, adventureName, summaries, factsText);
     }
 
     private record OllamaGenerateResponse(String response) {

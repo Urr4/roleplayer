@@ -8,6 +8,7 @@ import {
   Card,
   CardContent,
   Chip,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -65,6 +66,7 @@ import {
   getWorlds,
   importCharacterIntoChronicle,
   pauseRecording,
+  pushWorldFacts,
   removeAdventureCharacter,
   replaceCharacterSheet,
   resumeRecording,
@@ -157,6 +159,10 @@ export default function ChronicleTab({
   const [addingParticipant, setAddingParticipant] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
+
+  const [factsDraftText, setFactsDraftText] = useState<Record<string, string>>({});
+  const [pushingFactsAdventureId, setPushingFactsAdventureId] = useState<string | null>(null);
+  const [factsPushError, setFactsPushError] = useState<Record<string, string>>({});
 
   const [recordDialogOpen, setRecordDialogOpen] = useState(false);
   const [recordDialogAdventureId, setRecordDialogAdventureId] = useState<string | null>(null);
@@ -329,6 +335,41 @@ export default function ChronicleTab({
     return () => window.clearInterval(interval);
   }, [expandedAdventureId, fetchRecordingState]);
 
+  // Seed the editable "world facts" textarea once a draft becomes available
+  // from the backend (phase 1 finished, or an empty draft for adventures
+  // without recordings) - but only the first time we see it for a given
+  // adventure, so we never clobber text the user is actively editing.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFactsDraftText(previous => {
+      let changed = false;
+      const next = { ...previous };
+      for (const adventure of adventures) {
+        const hasDraftStatus = adventure.worldExtractionStatus === 'DRAFT_READY'
+          || adventure.worldExtractionStatus === 'FAILED'
+          || adventure.worldExtractionStatus === 'PUSHING'
+          || adventure.worldExtractionStatus === 'DONE';
+        if (hasDraftStatus && next[adventure.id] === undefined) {
+          next[adventure.id] = adventure.draftFactsText ?? '';
+          changed = true;
+        }
+      }
+      return changed ? next : previous;
+    });
+  }, [adventures]);
+
+  // Poll while any adventure is still waiting on transcription/phase-1 LLM
+  // extraction, so the spinner ("Waiting on facts") automatically switches to
+  // the editable textarea once the draft becomes available.
+  useEffect(() => {
+    const hasPending = adventures.some(adventure => adventure.worldExtractionStatus === 'PENDING');
+    if (!hasPending) return;
+    const interval = window.setInterval(() => {
+      void refreshAdventures();
+    }, 5000);
+    return () => window.clearInterval(interval);
+  }, [adventures, refreshAdventures]);
+
 
   useEffect(
     () => () => {
@@ -486,6 +527,30 @@ export default function ChronicleTab({
       await refreshAdventures();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to stop adventure.');
+    }
+  };
+
+  const handleAddFactsToWorld = async (adventureId: string) => {
+    const factsText = factsDraftText[adventureId] ?? '';
+    setPushingFactsAdventureId(adventureId);
+    setFactsPushError(previous => {
+      const rest = { ...previous };
+      delete rest[adventureId];
+      return rest;
+    });
+    try {
+      await pushWorldFacts(adventureId, factsText);
+      await refreshAdventures();
+    } catch (err) {
+      const message = axios.isAxiosError(err)
+        ? err.response?.data?.message ?? err.message
+        : err instanceof Error
+          ? err.message
+          : 'Add facts to world failed.';
+      setFactsPushError(previous => ({ ...previous, [adventureId]: message }));
+      await refreshAdventures();
+    } finally {
+      setPushingFactsAdventureId(null);
     }
   };
 
@@ -1107,13 +1172,16 @@ export default function ChronicleTab({
                                         </Typography>
                                       )}
                                       {adventure.worldExtractionStatus === 'PENDING' && (
-                                        <Typography variant="caption" color="text.secondary" component="span">Extrahiere Weltfakten…</Typography>
+                                        <Typography variant="caption" color="text.secondary" component="span">Waiting on facts…</Typography>
+                                      )}
+                                      {adventure.worldExtractionStatus === 'DRAFT_READY' && (
+                                        <Typography variant="caption" color="text.secondary" component="span">Weltfakten bereit zum Review</Typography>
                                       )}
                                       {adventure.worldExtractionStatus === 'DONE' && (
-                                        <Typography variant="caption" color="success.main" component="span">Weltfakten aktualisiert ✓{activeChronicle?.worldSlug ? ` · https://urr4.github.io/roleplaying-worlds/worlds/${activeChronicle.worldSlug}/` : ''}</Typography>
+                                        <Typography variant="caption" color="success.main" component="span">Weltfakten aktualisiert ✓</Typography>
                                       )}
-                                      {adventure.worldExtractionStatus === 'FAILED' && adventure.worldExtractionError && (
-                                        <Alert severity="error" sx={{ mt: 0.5 }}>{adventure.worldExtractionError}</Alert>
+                                      {adventure.worldExtractionStatus === 'FAILED' && (
+                                        <Typography variant="caption" color="error.main" component="span">Push fehlgeschlagen – siehe unten</Typography>
                                       )}
                                     </Stack>
                                   }
@@ -1205,6 +1273,67 @@ export default function ChronicleTab({
                             <Typography variant="caption" color="text.secondary">
                               If a player's character changes, create a new character for them above and add it here.
                             </Typography>
+
+                            <Divider />
+
+                            {(() => {
+                              const expandedAdventure = adventures.find(adventure => adventure.id === expandedAdventureId);
+                              if (!expandedAdventure || expandedAdventure.worldExtractionStatus === undefined
+                                || expandedAdventure.worldExtractionStatus === 'NONE') {
+                                return null;
+                              }
+                              const status = expandedAdventure.worldExtractionStatus;
+                              const isPushing = pushingFactsAdventureId === expandedAdventure.id || status === 'PUSHING';
+                              const pushError = factsPushError[expandedAdventure.id];
+                              return (
+                                <Box>
+                                  <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                                    World Facts
+                                  </Typography>
+                                  {status === 'PENDING' ? (
+                                    <Stack direction="row" spacing={1.5} alignItems="center" sx={{ py: 1 }}>
+                                      <CircularProgress size={18} />
+                                      <Typography color="text.secondary">Waiting on facts</Typography>
+                                    </Stack>
+                                  ) : (
+                                    <Stack spacing={1}>
+                                      {status === 'DONE' && (
+                                        <Alert severity="success">
+                                          Weltfakten aktualisiert ✓
+                                          {activeChronicle?.worldSlug
+                                            ? ` · https://urr4.github.io/roleplaying-worlds/worlds/${activeChronicle.worldSlug}/`
+                                            : ''}
+                                        </Alert>
+                                      )}
+                                      {status === 'FAILED' && (pushError || expandedAdventure.worldExtractionError) && (
+                                        <Alert severity="error">{pushError ?? expandedAdventure.worldExtractionError}</Alert>
+                                      )}
+                                      <TextField
+                                        multiline
+                                        minRows={6}
+                                        maxRows={20}
+                                        fullWidth
+                                        placeholder="Notizen zu Charakteren, NPCs, der Welt, Kultur, Politik usw. …"
+                                        value={factsDraftText[expandedAdventure.id] ?? ''}
+                                        disabled={isPushing}
+                                        onChange={event =>
+                                          setFactsDraftText(previous => ({ ...previous, [expandedAdventure.id]: event.target.value }))
+                                        }
+                                      />
+                                      <Button
+                                        variant="contained"
+                                        onClick={() => void handleAddFactsToWorld(expandedAdventure.id)}
+                                        disabled={isPushing}
+                                        startIcon={isPushing ? <CircularProgress size={16} color="inherit" /> : undefined}
+                                        sx={{ alignSelf: 'flex-start' }}
+                                      >
+                                        {isPushing ? 'Pushing…' : 'Add facts to world'}
+                                      </Button>
+                                    </Stack>
+                                  )}
+                                </Box>
+                              );
+                            })()}
 
                             <Divider />
 

@@ -23,7 +23,7 @@ public class JpaAdventureAdapter implements AdventureRepository {
         AdventureEntity saved = repository.save(new AdventureEntity(
                 adventure.id(), adventure.chronicleId(), adventure.name(), adventure.status(),
                 adventure.createdAt(), adventure.startedAt(), adventure.endedAt(),
-                adventure.worldExtractionStatus(), adventure.worldExtractionError()));
+                adventure.worldExtractionStatus(), adventure.worldExtractionError(), adventure.draftFactsText()));
         return toDomain(saved);
     }
 
@@ -57,6 +57,6 @@ public class JpaAdventureAdapter implements AdventureRepository {
         return new Adventure(entity.getId(), entity.getChronicleId(), entity.getName(), entity.getStatus(),
                 entity.getCreatedAt(), entity.getStartedAt(), entity.getEndedAt(),
                 entity.getWorldExtractionStatus() == null ? WorldExtractionStatus.NONE : entity.getWorldExtractionStatus(),
-                entity.getWorldExtractionError());
+                entity.getWorldExtractionError(), entity.getDraftFactsText());
     }
 }

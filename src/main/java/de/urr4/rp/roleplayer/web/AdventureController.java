@@ -5,6 +5,7 @@ import de.urr4.rp.roleplayer.application.AdventureService;
 import de.urr4.rp.roleplayer.domain.model.Adventure;
 import de.urr4.rp.roleplayer.web.dto.AdventureDto;
 import de.urr4.rp.roleplayer.web.dto.CreateAdventureRequest;
+import de.urr4.rp.roleplayer.web.dto.PushWorldFactsRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -67,6 +68,17 @@ public class AdventureController {
     @PostMapping("/api/adventures/{id}/stop")
     public AdventureDto stop(@PathVariable String id) {
         return AdventureDto.from(adventureService.stopAdventure(id));
+    }
+
+    @PostMapping("/api/adventures/{id}/world-facts/push")
+    public ResponseEntity<AdventureDto> pushWorldFacts(@PathVariable String id, @Valid @RequestBody PushWorldFactsRequest request) {
+        try {
+            return ResponseEntity.ok(AdventureDto.from(adventureService.pushWorldFacts(id, request.factsText())));
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.notFound().build();
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).build();
+        }
     }
 
     @DeleteMapping("/api/adventures/{id}")

@@ -11,7 +11,8 @@ public record Adventure(
         Instant startedAt,
         Instant endedAt,
         WorldExtractionStatus worldExtractionStatus,
-        String worldExtractionError) {
+        String worldExtractionError,
+        String draftFactsText) {
 
     public boolean isActive() {
         return status == AdventureStatus.ACTIVE;

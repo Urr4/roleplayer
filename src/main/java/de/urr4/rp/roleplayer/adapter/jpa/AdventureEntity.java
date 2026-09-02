@@ -25,12 +25,15 @@ public class AdventureEntity {
     @Enumerated(EnumType.STRING)
     private WorldExtractionStatus worldExtractionStatus;
     private String worldExtractionError;
+    @jakarta.persistence.Lob
+    private String draftFactsText;
 
     protected AdventureEntity() {}
 
     public AdventureEntity(String id, String chronicleId, String name, AdventureStatus status,
                             Instant createdAt, Instant startedAt, Instant endedAt,
-                            WorldExtractionStatus worldExtractionStatus, String worldExtractionError) {
+                            WorldExtractionStatus worldExtractionStatus, String worldExtractionError,
+                            String draftFactsText) {
         this.id = id;
         this.chronicleId = chronicleId;
         this.name = name;
@@ -40,6 +43,7 @@ public class AdventureEntity {
         this.endedAt = endedAt;
         this.worldExtractionStatus = worldExtractionStatus;
         this.worldExtractionError = worldExtractionError;
+        this.draftFactsText = draftFactsText;
     }
     public String getId() { return id; }
     public String getChronicleId() { return chronicleId; }
@@ -50,4 +54,5 @@ public class AdventureEntity {
     public Instant getEndedAt() { return endedAt; }
     public WorldExtractionStatus getWorldExtractionStatus() { return worldExtractionStatus; }
     public String getWorldExtractionError() { return worldExtractionError; }
+    public String getDraftFactsText() { return draftFactsText; }
 }

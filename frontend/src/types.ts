@@ -22,8 +22,9 @@ export interface AdventureDto {
   createdAt: string;
   startedAt: string | null;
   endedAt: string | null;
-  worldExtractionStatus?: 'NONE' | 'PENDING' | 'DONE' | 'FAILED';
+  worldExtractionStatus?: 'NONE' | 'PENDING' | 'DRAFT_READY' | 'PUSHING' | 'DONE' | 'FAILED';
   worldExtractionError?: string | null;
+  draftFactsText?: string | null;
 }
 
 export interface PlayerDto {

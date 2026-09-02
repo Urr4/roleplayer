@@ -3,7 +3,6 @@ package de.urr4.rp.roleplayer.application;
 import de.urr4.rp.roleplayer.domain.model.Adventure;
 import de.urr4.rp.roleplayer.domain.model.Chronicle;
 import de.urr4.rp.roleplayer.domain.model.TranscriptSegment;
-import de.urr4.rp.roleplayer.domain.model.VaultFileSummary;
 import de.urr4.rp.roleplayer.domain.model.VaultFileWrite;
 import de.urr4.rp.roleplayer.domain.model.VaultNoteChange;
 import de.urr4.rp.roleplayer.domain.model.World;
@@ -18,8 +17,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 
 @Service
@@ -45,41 +44,52 @@ public class WorldFactExtractionService {
         this.recordingService = recordingService;
     }
 
+    // ── Phase 1: gather facts from the transcript into a plain-text draft ──
+
     @Async("recordingTaskExecutor")
     public void onAdventureStopped(Adventure adventure) {
-        processAdventure(adventure, true);
+        gatherDraft(adventure, true);
     }
 
+    /**
+     * Retries phase 1 (gathering) for adventures still waiting on
+     * transcription or Ollama. Phase 2 (the vault push) is never retried
+     * automatically - it only runs when the user clicks "Add facts to world".
+     */
     public void retryPending() {
         List<Adventure> candidates = adventureRepository.findAll().stream()
-                .filter(a -> a.worldExtractionStatus() == WorldExtractionStatus.PENDING || a.worldExtractionStatus() == WorldExtractionStatus.FAILED)
+                .filter(a -> a.worldExtractionStatus() == WorldExtractionStatus.PENDING)
                 .toList();
         if (candidates.isEmpty()) {
             return;
         }
         if (!worldBuildingClient.isReachable()) {
-            log.debug("Ollama still unreachable; {} adventure(s) remain pending for world extraction", candidates.size());
+            log.debug("Ollama still unreachable; {} adventure(s) remain pending for world-fact gathering", candidates.size());
             return;
         }
         for (Adventure adventure : candidates) {
-            processAdventure(adventure, false);
+            gatherDraft(adventure, false);
         }
     }
 
-    private void processAdventure(Adventure adventure, boolean setPendingBeforeReachabilityCheck) {
+    private void gatherDraft(Adventure adventure, boolean setPendingBeforeReachabilityCheck) {
         Optional<Chronicle> chronicleOptional = chronicleRepository.findById(adventure.chronicleId());
         if (chronicleOptional.isEmpty() || chronicleOptional.get().worldId() == null) {
-            log.info("Skipping world extraction for adventure {} because no world is linked", adventure.id());
+            log.info("Skipping world-fact gathering for adventure {} because no world is linked", adventure.id());
             return;
         }
         Chronicle chronicle = chronicleOptional.get();
         Optional<World> worldOptional = worldRepository.findById(chronicle.worldId());
         if (worldOptional.isEmpty()) {
-            log.info("Skipping world extraction for adventure {} because world {} is missing", adventure.id(), chronicle.worldId());
+            log.info("Skipping world-fact gathering for adventure {} because world {} is missing", adventure.id(), chronicle.worldId());
             return;
         }
         if (recordingService.listRecordings(adventure.id()).isEmpty()) {
-            log.info("Skipping world extraction for adventure {} because it has no recordings", adventure.id());
+            // No recordings at all: nothing to summarize automatically. Show
+            // an empty, editable draft right away so the user can type notes
+            // by hand and push them via "Add facts to world".
+            log.info("Adventure {} has no recordings; presenting an empty facts draft for manual notes", adventure.id());
+            saveDraft(adventure, WorldExtractionStatus.DRAFT_READY, null, "");
             return;
         }
         String transcriptText = recordingService.getAdventureTranscript(adventure.id()).stream()
@@ -93,41 +103,66 @@ public class WorldFactExtractionService {
             // can still be in flight when the adventure is marked stopped, or
             // a just-uploaded recording is still waiting on WhisperX/queued
             // for retry. This is transient, not permanent: mark PENDING so
-            // WorldFactRetryScheduler keeps retrying every couple of minutes
-            // once transcript segments actually show up, instead of silently
-            // and permanently skipping extraction (and the Obsidian push
-            // that depends on it) for good.
-            log.info("Transcript not ready yet for adventure {}; marking world extraction pending for retry", adventure.id());
-            saveStatus(adventure, WorldExtractionStatus.PENDING, null);
+            // retryPending() keeps retrying every couple of minutes once
+            // transcript segments actually show up.
+            log.info("Transcript not ready yet for adventure {}; marking world-fact gathering pending for retry", adventure.id());
+            saveDraft(adventure, WorldExtractionStatus.PENDING, null, adventure.draftFactsText());
             return;
         }
         Adventure pending = adventure;
         if (setPendingBeforeReachabilityCheck || adventure.worldExtractionStatus() != WorldExtractionStatus.PENDING) {
-            pending = saveStatus(adventure, WorldExtractionStatus.PENDING, null);
+            pending = saveDraft(adventure, WorldExtractionStatus.PENDING, null, adventure.draftFactsText());
         }
         if (!worldBuildingClient.isReachable()) {
             return;
         }
-        runExtraction(pending, chronicle, worldOptional.get(), transcriptText);
+        try {
+            String factsText = worldBuildingClient.summarizeFacts(worldOptional.get().name(), worldOptional.get().slug(),
+                    chronicle.name(), pending.name(), transcriptText);
+            saveDraft(pending, WorldExtractionStatus.DRAFT_READY, null, factsText);
+        } catch (Exception e) {
+            log.error("World-fact gathering failed for adventure {}", pending.id(), e);
+            saveDraft(pending, WorldExtractionStatus.PENDING, truncate(e.getMessage()), pending.draftFactsText());
+        }
     }
 
-    private void runExtraction(Adventure adventure, Chronicle chronicle, World world, String transcriptText) {
+    // ── Phase 2: merge the (user-reviewed) draft text into the vault ──────
+
+    /**
+     * Explicitly triggered by "Add facts to world". Saves the given text as
+     * the new draft, then asks the LLM to turn it into Markdown and merges it
+     * into the Obsidian vault. On failure the draft text is preserved and the
+     * status becomes FAILED so the user can correct/retry - no automatic
+     * background retry for this phase.
+     */
+    public Adventure pushFactsToVault(String adventureId, String factsText) {
+        Adventure adventure = adventureRepository.findById(adventureId)
+                .orElseThrow(() -> new NoSuchElementException("Adventure not found: " + adventureId));
+        Chronicle chronicle = chronicleRepository.findById(adventure.chronicleId())
+                .orElseThrow(() -> new IllegalStateException("Chronicle not found for adventure " + adventureId));
+        if (chronicle.worldId() == null) {
+            throw new IllegalStateException("No world linked to chronicle " + chronicle.id());
+        }
+        World world = worldRepository.findById(chronicle.worldId())
+                .orElseThrow(() -> new IllegalStateException("World not found: " + chronicle.worldId()));
+
+        Adventure pushing = saveDraft(adventure, WorldExtractionStatus.PUSHING, null, factsText);
         try {
             String worldFolderPath = "content/worlds/" + world.slug();
             List<String> noteSummaries = vaultRepository.listNotes(worldFolderPath).stream()
                     .map(summary -> summary.path() + "\n" + summary.excerpt())
                     .toList();
-            List<VaultNoteChange> changes = worldBuildingClient.extractFacts(world.name(), world.slug(), chronicle.name(),
-                    adventure.name(), transcriptText, noteSummaries);
+            List<VaultNoteChange> changes = worldBuildingClient.mergeFactsIntoVault(world.name(), world.slug(), chronicle.name(),
+                    pushing.name(), factsText, noteSummaries);
             List<VaultFileWrite> writes = changes.stream()
                     .map(change -> toWrite(world.slug(), change))
                     .filter(java.util.Objects::nonNull)
                     .toList();
-            vaultRepository.commitChanges("World facts from adventure '" + adventure.name() + "'", writes);
-            saveStatus(adventure, WorldExtractionStatus.DONE, null);
+            vaultRepository.commitChanges("World facts from adventure '" + pushing.name() + "'", writes);
+            return saveDraft(pushing, WorldExtractionStatus.DONE, null, factsText);
         } catch (Exception e) {
-            log.error("World extraction failed for adventure {}", adventure.id(), e);
-            saveStatus(adventure, WorldExtractionStatus.FAILED, truncate(e.getMessage()));
+            log.error("World-fact vault push failed for adventure {}", adventureId, e);
+            return saveDraft(pushing, WorldExtractionStatus.FAILED, truncate(e.getMessage()), factsText);
         }
     }
 
@@ -142,9 +177,9 @@ public class WorldFactExtractionService {
         return new VaultFileWrite(fullPath, change.markdownContent());
     }
 
-    private Adventure saveStatus(Adventure adventure, WorldExtractionStatus status, String error) {
+    private Adventure saveDraft(Adventure adventure, WorldExtractionStatus status, String error, String draftFactsText) {
         Adventure updated = new Adventure(adventure.id(), adventure.chronicleId(), adventure.name(), adventure.status(),
-                adventure.createdAt(), adventure.startedAt(), adventure.endedAt(), status, error);
+                adventure.createdAt(), adventure.startedAt(), adventure.endedAt(), status, error, draftFactsText);
         return adventureRepository.save(updated);
     }
 

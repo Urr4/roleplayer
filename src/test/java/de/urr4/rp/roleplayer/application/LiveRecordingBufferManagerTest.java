@@ -69,7 +69,7 @@ class LiveRecordingBufferManagerTest {
         chronicleRepository.save(new Chronicle("session-1", "Campaign Session", Instant.parse("2026-08-25T09:59:00Z"), null));
         InMemoryAdventureRepository adventureRepository = new InMemoryAdventureRepository();
         adventureRepository.save(new Adventure("adventure-1", "session-1", "Adventure One", AdventureStatus.ACTIVE,
-                Instant.parse("2026-08-25T09:59:00Z"), Instant.parse("2026-08-25T09:59:00Z"), null, de.urr4.rp.roleplayer.domain.model.WorldExtractionStatus.NONE, null));
+                Instant.parse("2026-08-25T09:59:00Z"), Instant.parse("2026-08-25T09:59:00Z"), null, de.urr4.rp.roleplayer.domain.model.WorldExtractionStatus.NONE, null, null));
 
         AudioStore audioStore = mock(AudioStore.class);
         when(audioStore.store(anyString(), any(byte[].class), anyString())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -114,7 +114,7 @@ class LiveRecordingBufferManagerTest {
         chronicleRepository.save(new Chronicle("session-1", "Campaign Session", Instant.parse("2026-08-25T09:59:00Z"), null));
         InMemoryAdventureRepository adventureRepository = new InMemoryAdventureRepository();
         adventureRepository.save(new Adventure("adventure-1", "session-1", "Adventure One", AdventureStatus.ACTIVE,
-                Instant.parse("2026-08-25T09:59:00Z"), Instant.parse("2026-08-25T09:59:00Z"), null, de.urr4.rp.roleplayer.domain.model.WorldExtractionStatus.NONE, null));
+                Instant.parse("2026-08-25T09:59:00Z"), Instant.parse("2026-08-25T09:59:00Z"), null, de.urr4.rp.roleplayer.domain.model.WorldExtractionStatus.NONE, null, null));
 
         AudioStore audioStore = mock(AudioStore.class);
         when(audioStore.store(anyString(), any(byte[].class), anyString())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -165,7 +165,7 @@ class LiveRecordingBufferManagerTest {
         var chronicleRepository = mock(de.urr4.rp.roleplayer.domain.port.out.ChronicleRepository.class);
         var adventureRepository = mock(de.urr4.rp.roleplayer.domain.port.out.AdventureRepository.class);
         Adventure adventure = new Adventure("adventure-1", "session-1", "Adventure One", AdventureStatus.ACTIVE,
-                Instant.parse("2026-08-25T09:59:00Z"), Instant.parse("2026-08-25T09:59:00Z"), null, de.urr4.rp.roleplayer.domain.model.WorldExtractionStatus.NONE, null);
+                Instant.parse("2026-08-25T09:59:00Z"), Instant.parse("2026-08-25T09:59:00Z"), null, de.urr4.rp.roleplayer.domain.model.WorldExtractionStatus.NONE, null, null);
         when(chronicleRepository.findById("session-1")).thenReturn(java.util.Optional.of(chronicle));
         when(adventureRepository.findById("adventure-1")).thenReturn(java.util.Optional.of(adventure));
         when(recordingRepository.findById(anyString())).thenAnswer(invocation ->
@@ -204,7 +204,7 @@ class LiveRecordingBufferManagerTest {
         chronicleRepository.save(new Chronicle("session-1", "Campaign Session", Instant.parse("2026-08-25T09:59:00Z"), null));
         InMemoryAdventureRepository adventureRepository = new InMemoryAdventureRepository();
         adventureRepository.save(new Adventure("adventure-1", "session-1", "Adventure One", AdventureStatus.ACTIVE,
-                Instant.parse("2026-08-25T09:59:00Z"), Instant.parse("2026-08-25T09:59:00Z"), null, de.urr4.rp.roleplayer.domain.model.WorldExtractionStatus.NONE, null));
+                Instant.parse("2026-08-25T09:59:00Z"), Instant.parse("2026-08-25T09:59:00Z"), null, de.urr4.rp.roleplayer.domain.model.WorldExtractionStatus.NONE, null, null));
 
         AudioStore audioStore = mock(AudioStore.class);
         when(audioStore.store(anyString(), any(byte[].class), anyString())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -253,7 +253,7 @@ class LiveRecordingBufferManagerTest {
         chronicleRepository.save(new Chronicle("session-1", "Campaign Session", Instant.parse("2026-08-25T09:59:00Z"), null));
         InMemoryAdventureRepository adventureRepository = new InMemoryAdventureRepository();
         adventureRepository.save(new Adventure("adventure-1", "session-1", "Adventure One", AdventureStatus.ACTIVE,
-                Instant.parse("2026-08-25T09:59:00Z"), Instant.parse("2026-08-25T09:59:00Z"), null, de.urr4.rp.roleplayer.domain.model.WorldExtractionStatus.NONE, null));
+                Instant.parse("2026-08-25T09:59:00Z"), Instant.parse("2026-08-25T09:59:00Z"), null, de.urr4.rp.roleplayer.domain.model.WorldExtractionStatus.NONE, null, null));
 
         AudioStore audioStore = mock(AudioStore.class);
         when(audioStore.store(anyString(), any(byte[].class), anyString())).thenAnswer(invocation -> invocation.getArgument(0));

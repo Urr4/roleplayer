@@ -123,7 +123,7 @@ class DeleteCascadeTransactionIntegrationTest {
                 Instant.now(), world.id()));
         Adventure adventure = adventureRepository.save(new Adventure(UUID.randomUUID().toString(), chronicle.id(),
                 "Test Adventure", AdventureStatus.COMPLETED, Instant.now(), Instant.now(), Instant.now(),
-                WorldExtractionStatus.NONE, null));
+                WorldExtractionStatus.NONE, null, null));
         Recording recording = recordingRepository.save(new Recording(UUID.randomUUID().toString(), chronicle.id(),
                 adventure.id(), RecordingSource.UPLOAD, RecordingStatus.DONE, Instant.now(), Instant.now(),
                 "audio-key", "transcript-key", null));
@@ -152,7 +152,7 @@ class DeleteCascadeTransactionIntegrationTest {
                 Instant.now(), world.id()));
         Adventure adventure = adventureRepository.save(new Adventure(UUID.randomUUID().toString(), chronicle.id(),
                 "Test Adventure 2", AdventureStatus.COMPLETED, Instant.now(), Instant.now(), Instant.now(),
-                WorldExtractionStatus.NONE, null));
+                WorldExtractionStatus.NONE, null, null));
         Recording recording = recordingRepository.save(new Recording(UUID.randomUUID().toString(), chronicle.id(),
                 adventure.id(), RecordingSource.UPLOAD, RecordingStatus.DONE, Instant.now(), Instant.now(),
                 "audio-key-2", "transcript-key-2", null));

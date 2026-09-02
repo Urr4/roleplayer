@@ -8,10 +8,11 @@ import java.time.Instant;
 
 public record AdventureDto(String id, String chronicleId, String name, AdventureStatus status,
                            Instant createdAt, Instant startedAt, Instant endedAt,
-                           WorldExtractionStatus worldExtractionStatus, String worldExtractionError) {
+                           WorldExtractionStatus worldExtractionStatus, String worldExtractionError,
+                           String draftFactsText) {
     public static AdventureDto from(Adventure adventure) {
         return new AdventureDto(adventure.id(), adventure.chronicleId(), adventure.name(), adventure.status(),
                 adventure.createdAt(), adventure.startedAt(), adventure.endedAt(),
-                adventure.worldExtractionStatus(), adventure.worldExtractionError());
+                adventure.worldExtractionStatus(), adventure.worldExtractionError(), adventure.draftFactsText());
     }
 }

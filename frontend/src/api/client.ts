@@ -48,6 +48,9 @@ export const startAdventure = (id: string) => api.post<AdventureDto>(`/adventure
 
 export const stopAdventure = (id: string) => api.post<AdventureDto>(`/adventures/${id}/stop`).then(r => r.data);
 
+export const pushWorldFacts = (id: string, factsText: string) =>
+  api.post<AdventureDto>(`/adventures/${id}/world-facts/push`, { factsText }).then(r => r.data);
+
 export const deleteAdventure = (id: string) => api.delete(`/adventures/${id}`);
 
 // ── Players (global) ─────────────────────────────────────────────────────────

@@ -63,10 +63,11 @@ public class WorldFactExtractionService {
         if (candidates.isEmpty()) {
             return;
         }
-        if (!worldBuildingClient.isReachable()) {
-            log.debug("Ollama still unreachable; {} adventure(s) remain pending for world-fact gathering", candidates.size());
-            return;
-        }
+        // Don't bail out for every candidate just because Ollama happens to
+        // be unreachable right now: gatherDraft() can resolve some of them
+        // (no recordings at all, or a transcript that only just appeared)
+        // without ever calling Ollama. Its own reachability check further
+        // down still skips the actual LLM call per-candidate when needed.
         for (Adventure adventure : candidates) {
             gatherDraft(adventure, false);
         }

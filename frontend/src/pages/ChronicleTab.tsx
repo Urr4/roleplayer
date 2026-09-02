@@ -362,14 +362,15 @@ export default function ChronicleTab({
   // extraction, so the spinner ("Waiting on facts") automatically switches to
   // the editable textarea once the draft becomes available.
   useEffect(() => {
-    const hasPending = adventures.some(adventure => adventure.worldExtractionStatus === 'PENDING');
+    const hasPending = adventures.some(adventure =>
+      adventure.worldExtractionStatus === 'PENDING'
+      || (adventure.status === 'COMPLETED' && adventure.worldExtractionStatus === 'NONE' && !!activeChronicle?.worldSlug));
     if (!hasPending) return;
     const interval = window.setInterval(() => {
       void refreshAdventures();
     }, 5000);
     return () => window.clearInterval(interval);
-  }, [adventures, refreshAdventures]);
-
+  }, [adventures, refreshAdventures, activeChronicle?.worldSlug]);
 
   useEffect(
     () => () => {

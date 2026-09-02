@@ -82,9 +82,18 @@ public class AdventureService {
     public Adventure stopAdventure(String id) {
         Adventure adventure = adventureRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Adventure not found: " + id));
+        // Set worldExtractionStatus synchronously (before kicking off the
+        // @Async gathering below) whenever a world is linked, so a client
+        // that reloads the adventure list right after this call already sees
+        // PENDING instead of racing the async task and observing a stale
+        // NONE that it has no reason to poll away from.
+        boolean worldLinked = chronicleRepository.findById(adventure.chronicleId())
+                .map(chronicle -> chronicle.worldId() != null)
+                .orElse(false);
+        WorldExtractionStatus initialStatus = worldLinked ? WorldExtractionStatus.PENDING : adventure.worldExtractionStatus();
         Adventure stopped = new Adventure(
                 adventure.id(), adventure.chronicleId(), adventure.name(), AdventureStatus.COMPLETED,
-                adventure.createdAt(), adventure.startedAt(), Instant.now(), adventure.worldExtractionStatus(), adventure.worldExtractionError(),
+                adventure.createdAt(), adventure.startedAt(), Instant.now(), initialStatus, adventure.worldExtractionError(),
                 adventure.draftFactsText());
         Adventure saved = adventureRepository.save(stopped);
         worldFactExtractionService.onAdventureStopped(saved);

@@ -63,17 +63,18 @@ public class WorldFactExtractionService {
         if (candidates.isEmpty()) {
             return;
         }
-        // Don't bail out for every candidate just because Ollama happens to
-        // be unreachable right now: gatherDraft() can resolve some of them
+        // Don't bail out for every candidate just because a previous attempt
+        // failed to reach Ollama: gatherDraft() can resolve some of them
         // (no recordings at all, or a transcript that only just appeared)
-        // without ever calling Ollama. Its own reachability check further
-        // down still skips the actual LLM call per-candidate when needed.
+        // without calling Ollama at all, and retries the real /api/generate
+        // call for the rest, relying on its own timeout/catch to skip
+        // candidates Ollama still doesn't answer for.
         for (Adventure adventure : candidates) {
             gatherDraft(adventure, false);
         }
     }
 
-    private void gatherDraft(Adventure adventure, boolean setPendingBeforeReachabilityCheck) {
+    private void gatherDraft(Adventure adventure, boolean forcePendingResave) {
         Optional<Chronicle> chronicleOptional = chronicleRepository.findById(adventure.chronicleId());
         if (chronicleOptional.isEmpty() || chronicleOptional.get().worldId() == null) {
             log.info("Skipping world-fact gathering for adventure {} because no world is linked", adventure.id());
@@ -111,12 +112,19 @@ public class WorldFactExtractionService {
             return;
         }
         Adventure pending = adventure;
-        if (setPendingBeforeReachabilityCheck || adventure.worldExtractionStatus() != WorldExtractionStatus.PENDING) {
+        if (forcePendingResave || adventure.worldExtractionStatus() != WorldExtractionStatus.PENDING) {
             pending = saveDraft(adventure, WorldExtractionStatus.PENDING, null, adventure.draftFactsText());
         }
-        if (!worldBuildingClient.isReachable()) {
-            return;
-        }
+        // Call Ollama directly instead of gating on a separate isReachable()
+        // preflight (a GET /api/tags with its own short timeout): that probe
+        // is an extra point of failure independent of the actual /api/generate
+        // call, and a transient hiccup or a slow response (e.g. Ollama busy
+        // loading/running another request) there previously aborted this
+        // whole attempt *silently* - without ever contacting Ollama for the
+        // real request - even though the actual call, with its much more
+        // generous READ_TIMEOUT, would likely have succeeded. This mirrors
+        // how the mealplaner backend calls Ollama: no preflight check, just
+        // try the real endpoint and let the timeout/catch below handle it.
         try {
             String factsText = worldBuildingClient.summarizeFacts(worldOptional.get().name(), worldOptional.get().slug(),
                     chronicle.name(), pending.name(), transcriptText);

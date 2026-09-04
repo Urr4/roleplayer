@@ -3,6 +3,10 @@ package de.urr4.rp.roleplayer.application;
 import de.urr4.rp.roleplayer.domain.model.Adventure;
 import de.urr4.rp.roleplayer.domain.model.AdventureStatus;
 import de.urr4.rp.roleplayer.domain.model.Chronicle;
+import de.urr4.rp.roleplayer.domain.model.Recording;
+import de.urr4.rp.roleplayer.domain.model.RecordingSource;
+import de.urr4.rp.roleplayer.domain.model.RecordingStatus;
+import de.urr4.rp.roleplayer.domain.model.TranscriptSegment;
 import de.urr4.rp.roleplayer.domain.model.World;
 import de.urr4.rp.roleplayer.domain.model.WorldExtractionStatus;
 import de.urr4.rp.roleplayer.domain.port.out.AdventureRepository;
@@ -65,5 +69,52 @@ class WorldFactExtractionServiceTest {
         assertThat(saved.worldExtractionStatus()).isEqualTo(WorldExtractionStatus.DRAFT_READY);
         assertThat(saved.draftFactsText()).isEqualTo("");
         verify(worldBuildingClient, never()).summarizeFacts(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void onAdventureStoppedCallsOllamaDirectlyWithoutAReachabilityPreflight() {
+        AdventureRepository adventureRepository = mock(AdventureRepository.class);
+        ChronicleRepository chronicleRepository = mock(ChronicleRepository.class);
+        WorldRepository worldRepository = mock(WorldRepository.class);
+        WorldBuildingClient worldBuildingClient = mock(WorldBuildingClient.class);
+        VaultRepository vaultRepository = mock(VaultRepository.class);
+        RecordingService recordingService = mock(RecordingService.class);
+
+        String adventureId = "adv-1";
+        String chronicleId = "chr-1";
+        String worldId = "world-1";
+        String recordingId = "rec-1";
+
+        Adventure stoppedAdventure = new Adventure(adventureId, chronicleId, "Session 1", AdventureStatus.COMPLETED,
+                Instant.now(), Instant.now(), Instant.now(), WorldExtractionStatus.PENDING, null, null);
+        Recording recording = new Recording(recordingId, chronicleId, adventureId, RecordingSource.MICROPHONE,
+                RecordingStatus.DONE, Instant.now(), Instant.now(), "audio.webm", "transcript.json");
+        TranscriptSegment segment = new TranscriptSegment("seg-1", recordingId, "Spieler 1", 0L, 1000L,
+                "Wir betreten die Taverne.", Instant.now());
+
+        when(chronicleRepository.findById(chronicleId))
+                .thenReturn(Optional.of(new Chronicle(chronicleId, "Chronicle", Instant.now(), worldId)));
+        when(worldRepository.findById(worldId))
+                .thenReturn(Optional.of(new World(worldId, "World", "world", Instant.now())));
+        when(recordingService.listRecordings(adventureId)).thenReturn(List.of(recording));
+        when(recordingService.getAdventureTranscript(adventureId)).thenReturn(List.of(segment));
+        when(adventureRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(worldBuildingClient.summarizeFacts(any(), any(), any(), any(), any())).thenReturn("Die Gruppe betrat eine Taverne.");
+
+        WorldFactExtractionService service = new WorldFactExtractionService(adventureRepository, chronicleRepository,
+                worldRepository, worldBuildingClient, vaultRepository, recordingService);
+
+        service.onAdventureStopped(stoppedAdventure);
+
+        // No preflight reachability probe - the real endpoint is called
+        // directly, exactly like the mealplaner backend does.
+        verify(worldBuildingClient, never()).isReachable();
+        verify(worldBuildingClient).summarizeFacts(any(), any(), any(), any(), any());
+
+        ArgumentCaptor<Adventure> savedCaptor = ArgumentCaptor.forClass(Adventure.class);
+        verify(adventureRepository, org.mockito.Mockito.atLeastOnce()).save(savedCaptor.capture());
+        Adventure lastSaved = savedCaptor.getValue();
+        assertThat(lastSaved.worldExtractionStatus()).isEqualTo(WorldExtractionStatus.DRAFT_READY);
+        assertThat(lastSaved.draftFactsText()).isEqualTo("Die Gruppe betrat eine Taverne.");
     }
 }

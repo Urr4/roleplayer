@@ -81,6 +81,17 @@ public class AdventureController {
         }
     }
 
+    @PostMapping("/api/adventures/{id}/world-facts/retry")
+    public ResponseEntity<AdventureDto> retryWorldFacts(@PathVariable String id) {
+        try {
+            return ResponseEntity.ok(AdventureDto.from(adventureService.retryWorldFactGathering(id)));
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.notFound().build();
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).build();
+        }
+    }
+
     @DeleteMapping("/api/adventures/{id}")
     public ResponseEntity<Void> delete(@PathVariable String id) {
         try {

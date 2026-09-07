@@ -124,44 +124,31 @@ class RecordingProcessingService {
     }
 
     // Matches the MediaRecorder timeslice configured on the frontend
-    // (recorder.start(10000)) - used only to approximate the *relative*
-    // start offset of each WebM chunk within a flush batch for transcript
-    // segment timestamps in the UI; it is not exact (chunk boundaries can
-    // land slightly earlier/later depending on encoder buffering) but is
-    // good enough for display purposes, consistent with the rest of this
-    // class's "approximate" duration/offset tracking.
-    private static final long WEBM_CHUNK_NOMINAL_DURATION_MS = 10_000;
-
+    // (recorder.start(10000)) - used only as a fallback display offset; the
+    // real per-flush offset is now tracked precisely via fromMs (the
+    // buffer's lastTranscribedApproximateMs), see flushLocked.
     @Async("recordingTaskExecutor")
-    public void processLiveWebmChunks(Recording recording, String sessionName, List<byte[]> chunkAudioBytes,
-                                      long baseOffsetMs, Instant flushedAt, String language, boolean diarize,
-                                      Object recordingLock, Runnable onChunksPersisted) {
-        try {
-            // Each pending chunk is transcribed on its own (rather than
-            // concatenated into a single call) since a lone MediaRecorder
-            // WebM chunk is already a complete, valid file, whereas several
-            // of them concatenated raw are not - see flushLocked in
-            // LiveRecordingBufferManager and WebmRemuxer for the full
-            // explanation of why this previously silently truncated
-            // transcription to just the first chunk of a recording.
-            // Segments are only saved/published once every chunk in this
-            // batch has transcribed successfully, so a failure partway
-            // through (e.g. the ASR host becomes unreachable) can be safely
-            // retried in full on the next flush without risking duplicated
-            // segments from chunks that already succeeded this attempt.
-            List<TranscriptSegment> pendingSegments = new ArrayList<>();
-            for (int i = 0; i < chunkAudioBytes.size(); i++) {
-                byte[] chunkBytes = chunkAudioBytes.get(i);
-                if (chunkBytes.length == 0) {
-                    continue;
+    public void processLiveWebmAudio(Recording recording, String sessionName, byte[] deltaAudioBytes, long fromMs,
+                                     Instant flushedAt, String language, boolean diarize, boolean isFinal,
+                                     Object recordingLock, Runnable onChunksPersisted) {
+        if (deltaAudioBytes == null || deltaAudioBytes.length == 0) {
+            // Nothing new to transcribe this flush (or WebmRemuxer couldn't
+            // build a valid delta, e.g. ffmpeg unavailable) - if this is the
+            // final flush at stop(), the recording is otherwise already
+            // fully processed, so it can safely go straight to DONE.
+            if (isFinal) {
+                synchronized (recordingLock) {
+                    saveTerminalStatus(recording, RecordingStatus.DONE, null);
                 }
-                long chunkOffsetMs = baseOffsetMs + (long) i * WEBM_CHUNK_NOMINAL_DURATION_MS;
-                transcriptionClient.transcribe(recording.id(), chunkBytes, language, diarize).stream()
-                        .map(segment -> new TranscriptSegment(segment.id(), segment.recordingId(), segment.speakerLabel(),
-                                segment.startMs() + chunkOffsetMs, segment.endMs() + chunkOffsetMs, segment.text(),
-                                segment.createdAt()))
-                        .forEach(pendingSegments::add);
             }
+            return;
+        }
+        try {
+            List<TranscriptSegment> pendingSegments = transcriptionClient.transcribe(recording.id(), deltaAudioBytes, language, diarize)
+                    .stream()
+                    .map(segment -> new TranscriptSegment(segment.id(), segment.recordingId(), segment.speakerLabel(),
+                            segment.startMs() + fromMs, segment.endMs() + fromMs, segment.text(), segment.createdAt()))
+                    .toList();
 
             List<TranscriptSegment> saved = pendingSegments.stream()
                     .map(transcriptSegmentRepository::save)
@@ -169,16 +156,46 @@ class RecordingProcessingService {
             saved.forEach(segment -> transcriptEventPublisher.publish(recording.adventureId(), segment));
 
             synchronized (recordingLock) {
-                if (!chunkAudioBytes.isEmpty()) {
-                    onChunksPersisted.run();
-                }
+                onChunksPersisted.run();
                 refreshTranscriptObject(recording, sessionName, flushedAt);
+                if (isFinal) {
+                    saveTerminalStatus(recording, RecordingStatus.DONE, null);
+                }
+            }
+        } catch (AsrUnavailableException e) {
+            // Audio is already safely stored (the caller already uploaded it
+            // to MinIO before invoking this method) - nothing is lost. For a
+            // mid-recording flush this just retries on the next cycle once
+            // ASR is reachable again; for the final stop() flush, mark the
+            // recording AWAITING_ASR (instead of leaving it wrongly stuck at
+            // whatever non-terminal status it had) so RecordingRetryScheduler
+            // and the frontend can both observe and retry it.
+            if (isFinal) {
+                log.warn("ASR service unreachable while finalizing microphone recording {}; will retry automatically",
+                        recording.id(), e);
+                synchronized (recordingLock) {
+                    saveTerminalStatus(recording, RecordingStatus.AWAITING_ASR,
+                            "ASR service is currently unreachable; transcription will be retried automatically.");
+                }
+            } else {
+                log.debug("ASR service unreachable during live transcription for recording {}; will retry on the"
+                        + " next flush", recording.id());
             }
         } catch (Exception e) {
-            log.warn("Failed to process live microphone recording chunks for {}; transcription boundary left"
+            log.warn("Failed to process live microphone recording audio for {}; transcription boundary left"
                     + " unchanged for retry", recording.id(), e);
-            throw new IllegalStateException("Failed to process live microphone recording chunks " + recording.id(), e);
+            if (isFinal) {
+                synchronized (recordingLock) {
+                    saveTerminalStatus(recording, RecordingStatus.FAILED, "Transcription failed: " + e.getMessage());
+                }
+            }
         }
+    }
+
+    private void saveTerminalStatus(Recording recording, RecordingStatus status, String errorMessage) {
+        recordingRepository.save(new Recording(recording.id(), recording.chronicleId(), recording.adventureId(),
+                recording.source(), status, recording.startedAt(), recording.endedAt(), recording.audioObjectKey(),
+                recording.transcriptObjectKey(), errorMessage));
     }
 
     @Async("recordingTaskExecutor")

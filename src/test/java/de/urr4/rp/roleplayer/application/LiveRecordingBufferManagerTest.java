@@ -102,8 +102,8 @@ class LiveRecordingBufferManagerTest {
         verify(audioStore, times(2)).store(anyString(), audioBytesCaptor.capture(), anyString());
         assertEquals(2, audioBytesCaptor.getAllValues().size());
         assertArrayEquals(new byte[]{1, 2, 3, 4, 5}, audioBytesCaptor.getAllValues().get(1));
-        verify(processingService, times(2)).processLiveWebmChunks(any(Recording.class), anyString(), any(List.class),
-                anyLong(), any(Instant.class), anyString(), anyBoolean(), any(Object.class), any(Runnable.class));
+        verify(processingService, times(2)).processLiveWebmAudio(any(Recording.class), anyString(), any(byte[].class),
+                anyLong(), any(Instant.class), anyString(), anyBoolean(), anyBoolean(), any(Object.class), any(Runnable.class));
         assertFalse(Files.exists(bufferDirectory.resolve(recording.id() + ".audio")));
     }
 
@@ -137,21 +137,18 @@ class LiveRecordingBufferManagerTest {
         clock.advance(Duration.ofSeconds(5));
         manager.pause(recording.id());
 
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<byte[]>> chunkBytesCaptor = ArgumentCaptor.forClass(List.class);
-        verify(processingService, times(2)).processLiveWebmChunks(any(Recording.class), anyString(),
-                chunkBytesCaptor.capture(), anyLong(), any(Instant.class), anyString(), anyBoolean(), any(Object.class),
-                any(Runnable.class));
-        List<List<byte[]>> capturedChunkBatches = chunkBytesCaptor.getAllValues();
-        assertEquals(1, capturedChunkBatches.get(0).size());
-        assertArrayEquals(new byte[]{1, 2, 3}, capturedChunkBatches.get(0).get(0));
+        ArgumentCaptor<byte[]> deltaAudioCaptor = ArgumentCaptor.forClass(byte[].class);
+        verify(processingService, times(2)).processLiveWebmAudio(any(Recording.class), anyString(),
+                deltaAudioCaptor.capture(), anyLong(), any(Instant.class), anyString(), anyBoolean(), anyBoolean(),
+                any(Object.class), any(Runnable.class));
+        List<byte[]> capturedDeltas = deltaAudioCaptor.getAllValues();
+        assertArrayEquals(new byte[]{1, 2, 3}, capturedDeltas.get(0));
         // The mocked processingService never invokes the onChunksPersisted
         // callback, so the transcription boundary is never advanced - the
-        // second flush should therefore still see the first (not-yet-
-        // transcribed, per this mock) chunk in addition to the new one.
-        assertEquals(2, capturedChunkBatches.get(1).size());
-        assertArrayEquals(new byte[]{1, 2, 3}, capturedChunkBatches.get(1).get(0));
-        assertArrayEquals(new byte[]{4, 5}, capturedChunkBatches.get(1).get(1));
+        // second flush's delta should therefore cover *all* chunks recorded
+        // so far (the not-yet-transcribed, per this mock, first chunk plus
+        // the new one), not just the newest chunk.
+        assertArrayEquals(new byte[]{1, 2, 3, 4, 5}, capturedDeltas.get(1));
     }
 
     @Test

@@ -173,6 +173,26 @@ public class RecordingService {
         }
     }
 
+    /**
+     * Manually re-attempts transcription for a recording stuck in
+     * AWAITING_ASR (WhisperX was unreachable) or FAILED (transcription threw
+     * for some other reason), used by the "Retry Transcription" button. The
+     * audio itself is untouched - only re-fetched from storage and sent to
+     * WhisperX again.
+     */
+    public Recording retryTranscription(String recordingId) {
+        Recording recording = getRecording(recordingId);
+        if (recording.status() != RecordingStatus.AWAITING_ASR && recording.status() != RecordingStatus.FAILED) {
+            throw new IllegalStateException("Recording is not awaiting a transcription retry: " + recording.status());
+        }
+        if (recording.audioObjectKey() == null || recording.audioObjectKey().isBlank()) {
+            throw new IllegalStateException("Recording has no stored audio to retranscribe");
+        }
+        byte[] audioBytes = audioStore.fetch(recording.audioObjectKey());
+        recordingProcessingService.retryUpload(recording, audioBytes);
+        return recording;
+    }
+
     public List<Recording> listRecordings(String adventureId) {
         return recordingRepository.findByAdventureId(adventureId);
     }

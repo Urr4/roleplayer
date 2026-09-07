@@ -134,6 +134,17 @@ public class RecordingController {
         }
     }
 
+    @PostMapping("/{recordingId}/retry-transcription")
+    public ResponseEntity<RecordingDto> retryTranscription(@PathVariable String recordingId) {
+        try {
+            return ResponseEntity.accepted().body(toDto(recordingService.retryTranscription(recordingId)));
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.notFound().build();
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).build();
+        }
+    }
+
     @GetMapping("/{recordingId}/audio")
     public ResponseEntity<ByteArrayResource> audio(@PathVariable String adventureId, @PathVariable String recordingId) {
         try {

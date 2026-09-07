@@ -39,8 +39,21 @@ import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import StopIcon from '@mui/icons-material/Stop';
 import StopCircleIcon from '@mui/icons-material/StopCircle';
 import ExploreIcon from '@mui/icons-material/Explore';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import TranscriptPanel from './TranscriptPanel';
-import type { AdventureCharacterDto, AdventureDto, CharacterDto, ChronicleDto, DiscordGuildDto, DiscordVoiceChannelDto, PlayerDto, RecordingDto, TranscriptSegmentDto, WorldDto } from '../types';
+import type {
+  AdventureCharacterDto,
+  AdventureDto,
+  CharacterDto,
+  ChronicleDto,
+  DiscordGuildDto,
+  DiscordVoiceChannelDto,
+  PlayerDto,
+  RecordingDto,
+  ServiceStatusDto,
+  TranscriptSegmentDto,
+  WorldDto,
+} from '../types';
 import {
   addAdventureCharacter,
   appendRecordingChunk,
@@ -63,6 +76,7 @@ import {
   getPlayers,
   getRecordings,
   getRecordingTranscript,
+  getServiceStatus,
   getWorlds,
   importCharacterIntoChronicle,
   pauseRecording,
@@ -70,6 +84,8 @@ import {
   removeAdventureCharacter,
   replaceCharacterSheet,
   resumeRecording,
+  retryRecordingTranscription,
+  retryWorldFacts,
   startAdventure,
   startRecording,
   stopAdventure,
@@ -163,6 +179,10 @@ export default function ChronicleTab({
   const [factsDraftText, setFactsDraftText] = useState<Record<string, string>>({});
   const [pushingFactsAdventureId, setPushingFactsAdventureId] = useState<string | null>(null);
   const [factsPushError, setFactsPushError] = useState<Record<string, string>>({});
+  const [retryingFactsAdventureId, setRetryingFactsAdventureId] = useState<string | null>(null);
+
+  const [serviceStatus, setServiceStatus] = useState<ServiceStatusDto | null>(null);
+  const [retryingTranscriptionId, setRetryingTranscriptionId] = useState<string | null>(null);
 
   const [recordDialogOpen, setRecordDialogOpen] = useState(false);
   const [recordDialogAdventureId, setRecordDialogAdventureId] = useState<string | null>(null);
@@ -291,6 +311,29 @@ export default function ChronicleTab({
     void refreshRoster().catch(err => setError(err instanceof Error ? err.message : 'Unable to load players and characters.'));
     void getWorlds().then(setWorlds).catch(err => setError(err instanceof Error ? err.message : 'Welten konnten nicht geladen werden.'));
   }, [refreshRoster]);
+
+  // Poll WhisperX/Ollama reachability so the "Retry Transcription"/"Retry
+  // fact collection" buttons can be enabled/disabled accordingly, and so the
+  // user can see when either dependency is down instead of the app silently
+  // hanging (e.g. "Waiting on facts" forever).
+  useEffect(() => {
+    let cancelled = false;
+    const poll = () => {
+      void getServiceStatus()
+        .then(status => {
+          if (!cancelled) setServiceStatus(status);
+        })
+        .catch(() => {
+          if (!cancelled) setServiceStatus({ whisperXReachable: false, ollamaReachable: false });
+        });
+    };
+    poll();
+    const interval = window.setInterval(poll, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -552,6 +595,44 @@ export default function ChronicleTab({
       await refreshAdventures();
     } finally {
       setPushingFactsAdventureId(null);
+    }
+  };
+
+  const handleRetryFactGathering = async (adventureId: string) => {
+    setRetryingFactsAdventureId(adventureId);
+    setFactsPushError(previous => {
+      const rest = { ...previous };
+      delete rest[adventureId];
+      return rest;
+    });
+    try {
+      await retryWorldFacts(adventureId);
+      await refreshAdventures();
+    } catch (err) {
+      const message = axios.isAxiosError(err)
+        ? err.response?.data?.message ?? err.message
+        : err instanceof Error
+          ? err.message
+          : 'Retrying fact collection failed.';
+      setFactsPushError(previous => ({ ...previous, [adventureId]: message }));
+    } finally {
+      setRetryingFactsAdventureId(null);
+    }
+  };
+
+  const handleRetryRecordingTranscription = async (adventureId: string, recordingId: string) => {
+    setRetryingTranscriptionId(recordingId);
+    try {
+      await retryRecordingTranscription(adventureId, recordingId);
+      const { liveRecordingAdventureId: currentLiveRecordingAdventureId, liveRecording: currentLiveRecording, recordings } =
+        await fetchRecordingState(adventureId);
+      setLiveRecordingAdventureId(currentLiveRecordingAdventureId);
+      setLiveRecording(currentLiveRecording);
+      setAdventureRecordings(recordings);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Retrying transcription failed.');
+    } finally {
+      setRetryingTranscriptionId(null);
     }
   };
 
@@ -1285,12 +1366,43 @@ export default function ChronicleTab({
                               }
                               const status = expandedAdventure.worldExtractionStatus;
                               const isPushing = pushingFactsAdventureId === expandedAdventure.id || status === 'PUSHING';
+                              const isRetryingFacts = retryingFactsAdventureId === expandedAdventure.id;
                               const pushError = factsPushError[expandedAdventure.id];
+                              const canRetryFacts = expandedAdventure.status === 'COMPLETED' && serviceStatus?.ollamaReachable === true;
                               return (
                                 <Box>
-                                  <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                                    World Facts
-                                  </Typography>
+                                  <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                                    <Typography variant="subtitle2" color="text.secondary">
+                                      World Facts
+                                    </Typography>
+                                    {expandedAdventure.status === 'COMPLETED' && (
+                                      <Tooltip
+                                        title={
+                                          serviceStatus?.ollamaReachable === false
+                                            ? 'Ollama is unreachable — cannot retry fact collection right now.'
+                                            : 'Re-run fact collection for this adventure'
+                                        }
+                                      >
+                                        <span>
+                                          <Button
+                                            size="small"
+                                            startIcon={
+                                              isRetryingFacts ? <CircularProgress size={14} color="inherit" /> : <RefreshIcon fontSize="small" />
+                                            }
+                                            disabled={!canRetryFacts || isRetryingFacts || isPushing}
+                                            onClick={() => void handleRetryFactGathering(expandedAdventure.id)}
+                                          >
+                                            {isRetryingFacts ? 'Retrying…' : 'Retry fact collection'}
+                                          </Button>
+                                        </span>
+                                      </Tooltip>
+                                    )}
+                                    {serviceStatus && !serviceStatus.ollamaReachable && (
+                                      <Typography variant="caption" color="warning.main">
+                                        Ollama unreachable
+                                      </Typography>
+                                    )}
+                                  </Stack>
                                   {status === 'PENDING' ? (
                                     <Stack direction="row" spacing={1.5} alignItems="center" sx={{ py: 1 }}>
                                       <CircularProgress size={18} />
@@ -1451,6 +1563,42 @@ export default function ChronicleTab({
                                                 <Alert severity="error" sx={{ mt: 0.5 }}>
                                                   {recording.errorMessage}
                                                 </Alert>
+                                              )}
+                                              {(recording.status === 'AWAITING_ASR' || recording.status === 'FAILED') && (
+                                                <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
+                                                  <Tooltip
+                                                    title={
+                                                      serviceStatus?.whisperXReachable === false
+                                                        ? 'WhisperX is unreachable — cannot retry transcription right now.'
+                                                        : 'Retry transcription for this recording'
+                                                    }
+                                                  >
+                                                    <span>
+                                                      <Button
+                                                        size="small"
+                                                        startIcon={
+                                                          retryingTranscriptionId === recording.id
+                                                            ? <CircularProgress size={14} color="inherit" />
+                                                            : <RefreshIcon fontSize="small" />
+                                                        }
+                                                        disabled={
+                                                          serviceStatus?.whisperXReachable !== true
+                                                          || retryingTranscriptionId === recording.id
+                                                        }
+                                                        onClick={() =>
+                                                          void handleRetryRecordingTranscription(recording.adventureId, recording.id)
+                                                        }
+                                                      >
+                                                        {retryingTranscriptionId === recording.id ? 'Retrying…' : 'Retry Transcription'}
+                                                      </Button>
+                                                    </span>
+                                                  </Tooltip>
+                                                  {serviceStatus && !serviceStatus.whisperXReachable && (
+                                                    <Typography variant="caption" color="warning.main">
+                                                      WhisperX unreachable
+                                                    </Typography>
+                                                  )}
+                                                </Stack>
                                               )}
                                               <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 1 }}>
                                                 <Typography variant="caption" color="text.secondary">

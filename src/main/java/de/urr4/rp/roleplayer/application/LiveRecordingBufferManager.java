@@ -130,15 +130,15 @@ public class LiveRecordingBufferManager {
             Recording recording = requireRecording(recordingId);
             requireStatus(recording, RecordingStatus.RECORDING, "Recording is not currently capturing audio");
             appendBytes(buffer.audioBufferPath(), chunkBytes, recordingId);
-            // For WebM sources (microphone), each MediaRecorder chunk is a
-            // self-contained WebM segment with its own header - raw byte
-            // concatenation (above, only kept around for hasBufferedAudio()
-            // bookkeeping) does not produce a valid multi-segment WebM file.
-            // Keep every chunk as its own file too so (a) the final stored
-            // audio can be stitched together with ffmpeg's concat demuxer,
-            // which is the only reliable way to get correct duration/seek
-            // metadata, and (b) each chunk can be transcribed individually -
-            // see WebmRemuxer and flushLocked for details.
+            // For WebM sources (microphone): only the very first chunk of
+            // the whole recording has an EBML/WebM header - every later
+            // chunk is a headerless continuation of the same segment (see
+            // WebmRemuxer for the full explanation, including why chunk
+            // boundaries can even split mid-element). Keep every chunk as
+            // its own file (in addition to the flat append-only buffer used
+            // for hasBufferedAudio() bookkeeping) so the exact, in-order
+            // byte sequence needed to reconstruct valid WebM audio is always
+            // available - see WebmRemuxer and flushLocked for details.
             if ("webm".equalsIgnoreCase(buffer.fileExtension()) && chunkBytes != null && chunkBytes.length > 0) {
                 Path chunkPath = createWebmChunkFile(recordingId, buffer.nextChunkIndex());
                 writeBytes(chunkPath, chunkBytes, recordingId);
@@ -153,7 +153,7 @@ public class LiveRecordingBufferManager {
         synchronized (buffer) {
             Recording recording = requireRecording(recordingId);
             requireStatus(recording, RecordingStatus.RECORDING, "Recording is not currently active");
-            FlushResult flushResult = flushLocked(recording, buffer);
+            FlushResult flushResult = flushLocked(recording, buffer, false, null);
             buffer.pauseAt(flushResult.flushedAt());
             return saveRecording(flushResult.recording(), RecordingStatus.PAUSED, flushResult.recording().endedAt());
         }
@@ -176,9 +176,9 @@ public class LiveRecordingBufferManager {
             if (recording.status() != RecordingStatus.RECORDING && recording.status() != RecordingStatus.PAUSED) {
                 throw new IllegalStateException("Recording cannot be stopped from status " + recording.status());
             }
-            FlushResult flushResult = flushLocked(recording, buffer);
-            buffer.pauseAt(flushResult.flushedAt());
             Instant endedAt = Instant.now(clock);
+            FlushResult flushResult = flushLocked(recording, buffer, true, endedAt);
+            buffer.pauseAt(flushResult.flushedAt());
             if (buffer.storedAudioRequiresWavHeader()) {
                 // Discord: the whole recording is buffered per-speaker and
                 // only transcribed once, right here at stop time - this
@@ -209,10 +209,21 @@ public class LiveRecordingBufferManager {
                 deleteBufferArtifacts(buffer);
                 return processingRecording;
             }
-            Recording stoppedRecording = saveRecording(flushResult.recording(), RecordingStatus.DONE, endedAt);
+            // Microphone: mirror the Discord PROCESSING pattern above -
+            // flushLocked (isFinal=true) already kicked off the async
+            // transcription attempt for the final delta, which determines
+            // the terminal DONE/AWAITING_ASR/FAILED status itself (see
+            // RecordingProcessingService#processLiveWebmAudio) since ASR
+            // completion happens on a separate thread and must not be
+            // clobbered by a status write made here. Saving PROCESSING
+            // (rather than unconditionally DONE) ensures a recording is
+            // never marked done - and its audio buffer deleted - before we
+            // actually know whether transcription for the tail of the
+            // recording succeeded.
+            Recording processingRecording = saveRecording(flushResult.recording(), RecordingStatus.PROCESSING, endedAt);
             buffers.remove(recordingId);
             deleteBufferArtifacts(buffer);
-            return stoppedRecording;
+            return processingRecording;
         }
     }
 
@@ -231,10 +242,12 @@ public class LiveRecordingBufferManager {
                 // otherwise a connection drop (the very reason we usually end
                 // up here) silently throws away already-recorded audio with
                 // no chance of ever being stored or transcribed, even once
-                // the ASR service is reachable again.
+                // the ASR service is reachable again. Not final: this method
+                // always overwrites the status with FAILED right below
+                // regardless of the transcription outcome.
                 if (buffer.hasBufferedAudio() && recording.status() == RecordingStatus.RECORDING) {
                     try {
-                        recording = flushLocked(recording, buffer).recording();
+                        recording = flushLocked(recording, buffer, false, null).recording();
                     } catch (RuntimeException e) {
                         log.warn("Failed to flush buffered audio while failing recording {}", recordingId, e);
                     }
@@ -262,7 +275,7 @@ public class LiveRecordingBufferManager {
                     continue;
                 }
                 try {
-                    flushLocked(recording, buffer);
+                    flushLocked(recording, buffer, false, null);
                 } catch (RuntimeException e) {
                     log.warn("Scheduled flush failed for recording {}", entry.getKey(), e);
                 }
@@ -347,7 +360,8 @@ public class LiveRecordingBufferManager {
         }
     }
 
-    private FlushResult flushLocked(Recording recording, ManagedRecordingBuffer buffer) {
+    private FlushResult flushLocked(Recording recording, ManagedRecordingBuffer buffer, boolean isFinal,
+                                    Instant explicitEndedAt) {
         ensureOpenRecording(recording);
         Instant flushedAt = Instant.now(clock);
         byte[] fullBufferBytes = readAllBytes(buffer.audioBufferPath(), recording.id());
@@ -360,8 +374,9 @@ public class LiveRecordingBufferManager {
                 buffer.fileExtension());
         byte[] storedAudioBytes = buffer.prepareStoredAudio(fullBufferBytes);
         String storedAudioObjectKey = audioStore.store(newAudioObjectKey, storedAudioBytes, buffer.contentType());
+        Instant endedAtForUpdate = explicitEndedAt != null ? explicitEndedAt : recording.endedAt();
         Recording updatedRecording = recordingRepository.save(new Recording(recording.id(), recording.chronicleId(),
-                recording.adventureId(), recording.source(), recording.status(), recording.startedAt(), recording.endedAt(),
+                recording.adventureId(), recording.source(), recording.status(), recording.startedAt(), endedAtForUpdate,
                 storedAudioObjectKey, recording.transcriptObjectKey()));
         if (recording.audioObjectKey() != null && !recording.audioObjectKey().equals(storedAudioObjectKey)) {
             try {
@@ -379,31 +394,23 @@ public class LiveRecordingBufferManager {
             // only needs to (re)upload the accumulated combined audio to
             // S3/MinIO so nothing is lost if the process crashes mid-session.
         } else {
-            // Microphone (WebM): each MediaRecorder timeslice chunk is a
-            // complete, self-contained WebM file on its own (its own
-            // EBML/WebM header). Previously this branch transcribed a raw
-            // byte-range slice of the flat, append-only buffer, which - once
-            // that range spanned more than one chunk - is just several whole
-            // WebM files concatenated back to back with no remuxing. Exactly
-            // like the browser playback problem WebmRemuxer works around,
-            // WhisperX's own decoder only reads the *first* embedded header
-            // it finds and silently stops there, so only the very first
-            // chunk (~10s) of a longer recording was ever actually
-            // transcribed no matter how long the user spoke, and the
-            // remainder was dropped. Transcribing each pending chunk file
-            // individually sidesteps this entirely, since a lone chunk is
-            // already valid on its own - see WebmRemuxer for more detail on
-            // the underlying multi-segment WebM limitation.
-            long approximateOffsetMs = buffer.lastTranscribedApproximateMs();
+            // Microphone (WebM): only the very first MediaRecorder chunk
+            // has a header, every later chunk is a headerless continuation
+            // (see WebmRemuxer for the full explanation) - so transcribing
+            // pending chunks individually silently failed/truncated for
+            // everything past the first ~10s. Instead, reuse the
+            // already-remuxed, fully valid storedAudioBytes computed above
+            // and trim out just the newly-recorded tail (since the last
+            // successful transcription pass) with WebmRemuxer.extractFromOffset,
+            // then transcribe that single valid delta file in one call.
+            long fromMs = buffer.lastTranscribedApproximateMs();
             long approximateDurationMs = buffer.approximateRecordedDurationMsAt(flushedAt);
-            List<Path> pendingChunkFiles = buffer.pendingWebmChunkFiles();
-            List<byte[]> pendingChunkAudio = pendingChunkFiles.stream()
-                    .map(chunkPath -> readAllBytes(chunkPath, recording.id()))
-                    .filter(bytes -> bytes.length > 0)
-                    .toList();
-            int pendingChunkCount = pendingChunkFiles.size();
-            recordingProcessingService.processLiveWebmChunks(updatedRecording, chronicle.name(), pendingChunkAudio,
-                    approximateOffsetMs, flushedAt, buffer.language(), buffer.diarize(), buffer, () -> {
+            int pendingChunkCount = buffer.pendingWebmChunkFiles().size();
+            byte[] deltaAudio = pendingChunkCount > 0
+                    ? WebmRemuxer.extractFromOffset(storedAudioBytes, fromMs)
+                    : null;
+            recordingProcessingService.processLiveWebmAudio(updatedRecording, chronicle.name(), deltaAudio, fromMs,
+                    flushedAt, buffer.language(), buffer.diarize(), isFinal, buffer, () -> {
                         if (pendingChunkCount > 0) {
                             buffer.markWebmChunksTranscribed(pendingChunkCount);
                             buffer.advanceTranscriptionBoundary(approximateDurationMs);
@@ -597,10 +604,12 @@ public class LiveRecordingBufferManager {
 
         /**
          * Returns the WebM chunk files (in order) that have not yet been
-         * transcribed. Each of these is a complete, self-contained WebM file
-         * on its own and should be transcribed individually - see
-         * flushLocked for why concatenating several of them into one blob
-         * silently truncates transcription to just the first chunk.
+         * transcribed. Used only to know *whether* there is anything new to
+         * transcribe (and how many chunks that covers, for boundary
+         * bookkeeping) - the actual audio sent to WhisperX is a freshly
+         * remuxed+trimmed delta built from the full recording so far (see
+         * flushLocked), not these raw chunk files themselves, since only the
+         * very first chunk of a recording is independently valid WebM.
          */
         private List<Path> pendingWebmChunkFiles() {
             return transcribedChunkCount >= webmChunkFiles.size()
@@ -725,14 +734,12 @@ public class LiveRecordingBufferManager {
             if (storedAudioRequiresWavHeader) {
                 return WavFileWriter.pcm16Stereo48kHz(fullBufferBytes);
             }
-            // Microphone recordings arrive as a series of independent
-            // MediaRecorder WebM chunks (see
-            // startLiveRecording/MICROPHONE_RECORDING_EXTENSION); stitch the
-            // individual chunk files (not the raw flat buffer, which is only
-            // valid for byte-offset tracking) together with ffmpeg's concat
-            // demuxer so duration/seeking work correctly in the browser's
-            // audio player - see WebmRemuxer for why raw concatenation alone
-            // does not work.
+            // Microphone recordings arrive as a series of MediaRecorder
+            // WebM chunks where only the first has a header (see
+            // WebmRemuxer); stitch the individual chunk files (not the raw
+            // flat buffer, which is only valid for byte-offset tracking)
+            // together via raw concatenation + a single ffmpeg remux pass so
+            // duration/seeking work correctly in the browser's audio player.
             if ("webm".equalsIgnoreCase(fileExtension)) {
                 return WebmRemuxer.concatChunks(webmChunkFiles);
             }

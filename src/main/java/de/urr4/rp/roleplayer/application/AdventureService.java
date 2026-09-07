@@ -110,6 +110,16 @@ public class AdventureService {
         return worldFactExtractionService.pushFactsToVault(id, factsText);
     }
 
+    /**
+     * Manually re-triggers phase 1 world-fact gathering for a single
+     * completed adventure - used by the "Retry fact collection" button,
+     * which the frontend only enables once the adventure is COMPLETED and
+     * Ollama is reachable.
+     */
+    public Adventure retryWorldFactGathering(String id) {
+        return worldFactExtractionService.retryFactGathering(id);
+    }
+
     @Transactional
     public void deleteAdventure(String id) {
         adventureRepository.findById(id)

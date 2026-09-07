@@ -74,25 +74,42 @@ public class WorldFactExtractionService {
         }
     }
 
-    private void gatherDraft(Adventure adventure, boolean forcePendingResave) {
+    /**
+     * Manually re-runs phase 1 (gathering) for a single completed adventure,
+     * used by the "Retry fact collection" button in the UI - unlike
+     * {@link #retryPending()} (only PENDING adventures, run automatically on
+     * a schedule), this can re-attempt gathering regardless of the
+     * adventure's current world-fact status (e.g. after Ollama was
+     * unreachable and the adventure ended up left in a non-PENDING state),
+     * as long as the adventure itself has actually finished.
+     */
+    public Adventure retryFactGathering(String adventureId) {
+        Adventure adventure = adventureRepository.findById(adventureId)
+                .orElseThrow(() -> new NoSuchElementException("Adventure not found: " + adventureId));
+        if (adventure.status() != de.urr4.rp.roleplayer.domain.model.AdventureStatus.COMPLETED) {
+            throw new IllegalStateException("Adventure must be completed before retrying fact gathering");
+        }
+        return gatherDraft(adventure, true);
+    }
+
+    private Adventure gatherDraft(Adventure adventure, boolean forcePendingResave) {
         Optional<Chronicle> chronicleOptional = chronicleRepository.findById(adventure.chronicleId());
         if (chronicleOptional.isEmpty() || chronicleOptional.get().worldId() == null) {
             log.info("Skipping world-fact gathering for adventure {} because no world is linked", adventure.id());
-            return;
+            return adventure;
         }
         Chronicle chronicle = chronicleOptional.get();
         Optional<World> worldOptional = worldRepository.findById(chronicle.worldId());
         if (worldOptional.isEmpty()) {
             log.info("Skipping world-fact gathering for adventure {} because world {} is missing", adventure.id(), chronicle.worldId());
-            return;
+            return adventure;
         }
         if (recordingService.listRecordings(adventure.id()).isEmpty()) {
             // No recordings at all: nothing to summarize automatically. Show
             // an empty, editable draft right away so the user can type notes
             // by hand and push them via "Add facts to world".
             log.info("Adventure {} has no recordings; presenting an empty facts draft for manual notes", adventure.id());
-            saveDraft(adventure, WorldExtractionStatus.DRAFT_READY, null, "");
-            return;
+            return saveDraft(adventure, WorldExtractionStatus.DRAFT_READY, null, "");
         }
         String transcriptText = recordingService.getAdventureTranscript(adventure.id()).stream()
                 .map(this::formatSegment)
@@ -108,8 +125,7 @@ public class WorldFactExtractionService {
             // retryPending() keeps retrying every couple of minutes once
             // transcript segments actually show up.
             log.info("Transcript not ready yet for adventure {}; marking world-fact gathering pending for retry", adventure.id());
-            saveDraft(adventure, WorldExtractionStatus.PENDING, null, adventure.draftFactsText());
-            return;
+            return saveDraft(adventure, WorldExtractionStatus.PENDING, null, adventure.draftFactsText());
         }
         Adventure pending = adventure;
         if (forcePendingResave || adventure.worldExtractionStatus() != WorldExtractionStatus.PENDING) {
@@ -128,10 +144,10 @@ public class WorldFactExtractionService {
         try {
             String factsText = worldBuildingClient.summarizeFacts(worldOptional.get().name(), worldOptional.get().slug(),
                     chronicle.name(), pending.name(), transcriptText);
-            saveDraft(pending, WorldExtractionStatus.DRAFT_READY, null, factsText);
+            return saveDraft(pending, WorldExtractionStatus.DRAFT_READY, null, factsText);
         } catch (Exception e) {
             log.error("World-fact gathering failed for adventure {}", pending.id(), e);
-            saveDraft(pending, WorldExtractionStatus.PENDING, truncate(e.getMessage()), pending.draftFactsText());
+            return saveDraft(pending, WorldExtractionStatus.PENDING, truncate(e.getMessage()), pending.draftFactsText());
         }
     }
 

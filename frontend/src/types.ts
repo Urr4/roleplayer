@@ -69,6 +69,11 @@ export interface AttributePools {
 export type RecordingSource = 'UPLOAD' | 'MICROPHONE' | 'DISCORD';
 export type RecordingStatus = 'RECORDING' | 'PAUSED' | 'STOPPED' | 'PROCESSING' | 'AWAITING_ASR' | 'DONE' | 'FAILED';
 
+export interface ServiceStatusDto {
+  whisperXReachable: boolean;
+  ollamaReachable: boolean;
+}
+
 export interface RecordingDto {
   id: string;
   chronicleId: string;

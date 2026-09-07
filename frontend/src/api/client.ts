@@ -12,6 +12,7 @@ import type {
   PlayerDto,
   RecordingDto,
   RecordingSource,
+  ServiceStatusDto,
   TranscriptSegmentDto,
 } from '../types';
 
@@ -51,7 +52,13 @@ export const stopAdventure = (id: string) => api.post<AdventureDto>(`/adventures
 export const pushWorldFacts = (id: string, factsText: string) =>
   api.post<AdventureDto>(`/adventures/${id}/world-facts/push`, { factsText }).then(r => r.data);
 
+export const retryWorldFacts = (id: string) =>
+  api.post<AdventureDto>(`/adventures/${id}/world-facts/retry`).then(r => r.data);
+
 export const deleteAdventure = (id: string) => api.delete(`/adventures/${id}`);
+
+// ── Service reachability (WhisperX/Ollama) ──────────────────────────────────
+export const getServiceStatus = () => api.get<ServiceStatusDto>('/status').then(r => r.data);
 
 // ── Players (global) ─────────────────────────────────────────────────────────
 export const getPlayers = () => api.get<PlayerDto[]>('/players').then(r => r.data);
@@ -148,6 +155,9 @@ export const resumeRecording = (adventureId: string, recordingId: string) =>
 
 export const stopRecording = (adventureId: string, recordingId: string) =>
   api.post<RecordingDto>(`/adventures/${adventureId}/recordings/${recordingId}/stop`).then(r => r.data);
+
+export const retryRecordingTranscription = (adventureId: string, recordingId: string) =>
+  api.post<RecordingDto>(`/adventures/${adventureId}/recordings/${recordingId}/retry-transcription`).then(r => r.data);
 
 export const getRecordingTranscript = (adventureId: string, recordingId: string) =>
   api.get<TranscriptSegmentDto[]>(`/adventures/${adventureId}/recordings/${recordingId}/transcript`).then(r => r.data);

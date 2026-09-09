@@ -4,6 +4,8 @@ import java.io.File;
 import java.nio.file.Path;
 import org.apache.catalina.connector.Connector;
 import org.apache.coyote.http11.Http11NioProtocol;
+import org.apache.tomcat.util.descriptor.web.SecurityCollection;
+import org.apache.tomcat.util.descriptor.web.SecurityConstraint;
 import org.apache.tomcat.util.net.SSLHostConfig;
 import org.apache.tomcat.util.net.SSLHostConfigCertificate;
 import org.slf4j.Logger;
@@ -16,16 +18,21 @@ import org.springframework.stereotype.Component;
 /**
  * Adds an additional HTTPS connector alongside the main plain-HTTP one
  * (server.port), using a self-signed PEM certificate generated on the host
- * (see setup.sh, same approach as the sibling "calories" project).
+ * (see setup.sh, same approach as the sibling "calories" project), and makes
+ * the plain-HTTP connector redirect every request to HTTPS instead of
+ * serving it directly.
  *
  * <p>Browsers only expose microphone access (getUserMedia, used for the
  * in-browser recording feature) in a "secure context" — plain
  * {@code http://<lan-host>:PORT} doesn't satisfy that, but
  * {@code https://<lan-host>:HTTPS_PORT} does, even with a self-signed
- * certificate (after accepting the browser's one-time warning).
+ * certificate (after accepting the browser's one-time warning). Beyond that,
+ * plain HTTP would also let credentials/audio/transcripts travel unencrypted
+ * on the LAN, so the app should only ever actually be *used* over HTTPS.
  *
  * <p>If no certificate/key files exist at the configured paths, HTTPS is
- * simply left disabled and the app keeps working as before over HTTP only.
+ * simply left disabled and the app keeps working as before over HTTP only
+ * (no redirect is installed, since there would be nothing to redirect to).
  */
 @Component
 public class HttpsConnectorConfig implements WebServerFactoryCustomizer<TomcatServletWebServerFactory> {
@@ -72,6 +79,23 @@ public class HttpsConnectorConfig implements WebServerFactoryCustomizer<TomcatSe
 
         factory.addAdditionalTomcatConnectors(connector);
         log.info("HTTPS connector enabled on port {} (cert: {})", httpsPort, certFile);
+
+        // Make the main plain-HTTP connector (server.port) redirect every
+        // request to the HTTPS connector above instead of serving it
+        // directly: point it at the HTTPS port and require a CONFIDENTIAL
+        // ("SSL required") transport guarantee for every URL pattern, which
+        // is what makes Tomcat actually issue the redirect rather than just
+        // knowing where one *could* go.
+        factory.addConnectorCustomizers(mainConnector -> mainConnector.setRedirectPort(httpsPort));
+        factory.addContextCustomizers(context -> {
+            SecurityConstraint constraint = new SecurityConstraint();
+            constraint.setUserConstraint("CONFIDENTIAL");
+            SecurityCollection collection = new SecurityCollection();
+            collection.addPattern("/*");
+            constraint.addCollection(collection);
+            context.addConstraint(constraint);
+        });
+        log.info("Plain HTTP requests will be redirected to HTTPS (port {})", httpsPort);
     }
 
     private File resolvePath(String override, String fileName) {
@@ -82,3 +106,4 @@ public class HttpsConnectorConfig implements WebServerFactoryCustomizer<TomcatSe
         return tlsDir.resolve(fileName).toFile();
     }
 }
+

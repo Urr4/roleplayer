@@ -20,10 +20,12 @@ version: "3.9"
 #       docker stack deploy -c docker-compose.yml roleplayer
 #
 #  Erreichbar unter:
-#    http://pi1:3002   (kein Mikrofon-Zugriff möglich - Browser blockieren
-#                       getUserMedia außerhalb von HTTPS/localhost)
 #    https://pi1:3502  (selbstsigniertes Zertifikat, siehe setup.sh;
 #                       Zertifikatswarnung im Browser einmalig bestätigen)
+#    http://pi1:3002   leitet automatisch auf https://pi1:3502 weiter
+#                      (kein direkter HTTP-Zugriff mehr möglich - Browser
+#                       blockieren getUserMedia/Mikrofonzugriff ohnehin
+#                       außerhalb von HTTPS/localhost)
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -68,7 +70,12 @@ services:
     depends_on:
       - minio
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3002/api/chronicles"]
+      # Plain HTTP now redirects to HTTPS (see HttpsConnectorConfig), and
+      # wget --spider follows redirects by default, so this must hit HTTPS
+      # directly with the self-signed certificate check disabled - otherwise
+      # the healthcheck would fail on the untrusted cert and mark the
+      # container unhealthy despite the app working fine.
+      test: ["CMD", "wget", "-q", "--no-check-certificate", "--spider", "https://localhost:3502/api/chronicles"]
       interval: 30s
       timeout: 10s
       retries: 3

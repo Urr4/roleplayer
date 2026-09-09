@@ -167,7 +167,7 @@ done
 
 echo ""
 echo "✓ Deployment complete. Reachable at:"
-echo "    http://pi1:3002   (no microphone access)"
 echo "    https://pi1:3502  (self-signed cert; accept the one-time browser warning; needed for microphone recording)"
+echo "    http://pi1:3002   automatically redirects to https://pi1:3502"
 echo ""
 docker stack ps "${STACK}" --no-trunc

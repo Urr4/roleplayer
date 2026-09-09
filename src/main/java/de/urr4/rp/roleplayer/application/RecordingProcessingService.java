@@ -100,6 +100,7 @@ class RecordingProcessingService {
      */
     @Async("recordingTaskExecutor")
     public void retryUpload(Recording recording, byte[] audioBytes) {
+        log.info("Retrying ASR transcription for recording {} ({} bytes of audio)", recording.id(), audioBytes.length);
         try {
             List<TranscriptSegment> segments = transcriptionClient.transcribe(recording.id(), audioBytes, "de", true)
                     .stream()
@@ -113,8 +114,15 @@ class RecordingProcessingService {
                     RecordingStatus.DONE, recording.startedAt(), Instant.now(), recording.audioObjectKey(), transcriptObjectKey));
             log.info("Successfully retried ASR transcription for recording {}", recording.id());
         } catch (AsrUnavailableException e) {
-            log.debug("ASR service still unreachable while retrying recording {}", recording.id());
-            // stays in AWAITING_ASR, will be retried again on the next scheduler tick
+            log.warn("ASR service still unreachable while retrying recording {}: {}", recording.id(), e.getMessage());
+            // Stays in AWAITING_ASR and will be retried again on the next
+            // scheduler tick, but refresh the error message with a fresh
+            // timestamp so the UI clearly shows a retry was just attempted
+            // (and failed) rather than silently doing nothing visible.
+            recordingRepository.save(new Recording(recording.id(), recording.chronicleId(), recording.adventureId(), recording.source(),
+                    RecordingStatus.AWAITING_ASR, recording.startedAt(), recording.endedAt(), recording.audioObjectKey(),
+                    recording.transcriptObjectKey(),
+                    "ASR service still unreachable (last retry attempted at " + Instant.now() + ")"));
         } catch (Exception e) {
             log.error("Failed to retry transcription for recording {}", recording.id(), e);
             recordingRepository.save(new Recording(recording.id(), recording.chronicleId(), recording.adventureId(), recording.source(),

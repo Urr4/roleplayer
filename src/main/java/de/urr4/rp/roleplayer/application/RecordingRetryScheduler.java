@@ -43,7 +43,7 @@ public class RecordingRetryScheduler {
             return;
         }
         if (!transcriptionClient.isReachable()) {
-            log.debug("ASR service still unreachable; {} recording(s) remain in AWAITING_ASR", awaitingAsr.size());
+            log.info("ASR service still unreachable; {} recording(s) remain in AWAITING_ASR", awaitingAsr.size());
             return;
         }
 

@@ -112,6 +112,8 @@ public class WorldFactExtractionService {
         // how the mealplaner backend calls Ollama: no preflight check, just
         // try the real endpoint and let the timeout/catch below handle it.
         try {
+            log.info("Calling Ollama to gather world facts for adventure {} ({} chars of transcript)",
+                    pending.id(), transcriptText.length());
             String factsText = worldBuildingClient.summarizeFacts(worldOptional.get().name(), worldOptional.get().slug(),
                     chronicle.name(), pending.name(), transcriptText);
             return saveDraft(pending, WorldExtractionStatus.DRAFT_READY, null, factsText);

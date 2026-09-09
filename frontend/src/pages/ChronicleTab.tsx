@@ -1392,10 +1392,24 @@ export default function ChronicleTab({
                                       exist and Ollama is reachable.
                                     </Typography>
                                   ) : status === 'PENDING' ? (
-                                    <Stack direction="row" spacing={1.5} alignItems="center" sx={{ py: 1 }}>
-                                      <CircularProgress size={18} />
-                                      <Typography color="text.secondary">Waiting on facts</Typography>
-                                    </Stack>
+                                    isGatheringFacts ? (
+                                      <Stack direction="row" spacing={1.5} alignItems="center" sx={{ py: 1 }}>
+                                        <CircularProgress size={18} />
+                                        <Typography color="text.secondary">Gathering facts…</Typography>
+                                      </Stack>
+                                    ) : expandedAdventure.worldExtractionError ? (
+                                      <Stack spacing={0.5}>
+                                        <Alert severity="error">{expandedAdventure.worldExtractionError}</Alert>
+                                        <Typography variant="caption" color="text.secondary">
+                                          Click "Gather World-Facts" again once the issue above is resolved.
+                                        </Typography>
+                                      </Stack>
+                                    ) : (
+                                      <Typography variant="caption" color="text.secondary">
+                                        Waiting for transcriptions to finish. Click "Gather World-Facts" again once
+                                        transcription has completed.
+                                      </Typography>
+                                    )
                                   ) : (
                                     <Stack spacing={1}>
                                       {status === 'DONE' && (
@@ -1547,8 +1561,8 @@ export default function ChronicleTab({
                                                     : 'Audio not available yet.'}
                                                 </Typography>
                                               )}
-                                              {recording.status === 'FAILED' && recording.errorMessage && (
-                                                <Alert severity="error" sx={{ mt: 0.5 }}>
+                                              {(recording.status === 'FAILED' || recording.status === 'AWAITING_ASR') && recording.errorMessage && (
+                                                <Alert severity={recording.status === 'FAILED' ? 'error' : 'warning'} sx={{ mt: 0.5 }}>
                                                   {recording.errorMessage}
                                                 </Alert>
                                               )}

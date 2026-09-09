@@ -14,7 +14,6 @@ import de.urr4.rp.roleplayer.domain.port.out.WorldBuildingClient;
 import de.urr4.rp.roleplayer.domain.port.out.WorldRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -46,48 +45,22 @@ public class WorldFactExtractionService {
 
     // ── Phase 1: gather facts from the transcript into a plain-text draft ──
 
-    @Async("recordingTaskExecutor")
-    public void onAdventureStopped(Adventure adventure) {
-        gatherDraft(adventure, true);
-    }
-
     /**
-     * Retries phase 1 (gathering) for adventures still waiting on
-     * transcription or Ollama. Phase 2 (the vault push) is never retried
-     * automatically - it only runs when the user clicks "Add facts to world".
+     * Manually triggers phase 1 (gathering) for a single adventure - used by
+     * the "Gather World-Facts" button, which the frontend only enables once
+     * at least one recording/transcript exists and Ollama is reachable. This
+     * is never invoked automatically (there used to be an automatic trigger
+     * on adventure stop plus a background retry scheduler for adventures
+     * stuck PENDING; both were removed since a hung/unreachable Ollama made
+     * the "Waiting on facts" UI spin forever with no way for the user to
+     * intervene). The user decides when to (re-)run gathering, regardless of
+     * whether the adventure has ended or its current world-fact status.
      */
-    public void retryPending() {
-        List<Adventure> candidates = adventureRepository.findAll().stream()
-                .filter(a -> a.worldExtractionStatus() == WorldExtractionStatus.PENDING)
-                .toList();
-        if (candidates.isEmpty()) {
-            return;
-        }
-        // Don't bail out for every candidate just because a previous attempt
-        // failed to reach Ollama: gatherDraft() can resolve some of them
-        // (no recordings at all, or a transcript that only just appeared)
-        // without calling Ollama at all, and retries the real /api/generate
-        // call for the rest, relying on its own timeout/catch to skip
-        // candidates Ollama still doesn't answer for.
-        for (Adventure adventure : candidates) {
-            gatherDraft(adventure, false);
-        }
-    }
-
-    /**
-     * Manually re-runs phase 1 (gathering) for a single completed adventure,
-     * used by the "Retry fact collection" button in the UI - unlike
-     * {@link #retryPending()} (only PENDING adventures, run automatically on
-     * a schedule), this can re-attempt gathering regardless of the
-     * adventure's current world-fact status (e.g. after Ollama was
-     * unreachable and the adventure ended up left in a non-PENDING state),
-     * as long as the adventure itself has actually finished.
-     */
-    public Adventure retryFactGathering(String adventureId) {
+    public Adventure gatherWorldFacts(String adventureId) {
         Adventure adventure = adventureRepository.findById(adventureId)
                 .orElseThrow(() -> new NoSuchElementException("Adventure not found: " + adventureId));
-        if (adventure.status() != de.urr4.rp.roleplayer.domain.model.AdventureStatus.COMPLETED) {
-            throw new IllegalStateException("Adventure must be completed before retrying fact gathering");
+        if (recordingService.listRecordings(adventureId).isEmpty()) {
+            throw new IllegalStateException("No recordings available to gather world facts from");
         }
         return gatherDraft(adventure, true);
     }
@@ -117,14 +90,11 @@ public class WorldFactExtractionService {
                 .orElse("");
         if (transcriptText.isBlank()) {
             // The adventure has recordings, but no transcript segments exist
-            // yet - most likely because the final live-recording flush's ASR
-            // call runs asynchronously (see RecordingProcessingService) and
-            // can still be in flight when the adventure is marked stopped, or
-            // a just-uploaded recording is still waiting on WhisperX/queued
-            // for retry. This is transient, not permanent: mark PENDING so
-            // retryPending() keeps retrying every couple of minutes once
-            // transcript segments actually show up.
-            log.info("Transcript not ready yet for adventure {}; marking world-fact gathering pending for retry", adventure.id());
+            // yet - most likely because transcription is still in progress /
+            // queued for retry (e.g. WhisperX was unreachable). This is
+            // transient, not permanent: mark PENDING and let the user click
+            // "Gather World-Facts" again once transcription has completed.
+            log.info("Transcript not ready yet for adventure {}; marking world-fact gathering pending", adventure.id());
             return saveDraft(adventure, WorldExtractionStatus.PENDING, null, adventure.draftFactsText());
         }
         Adventure pending = adventure;

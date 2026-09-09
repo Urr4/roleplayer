@@ -81,10 +81,10 @@ public class AdventureController {
         }
     }
 
-    @PostMapping("/api/adventures/{id}/world-facts/retry")
-    public ResponseEntity<AdventureDto> retryWorldFacts(@PathVariable String id) {
+    @PostMapping("/api/adventures/{id}/world-facts/gather")
+    public ResponseEntity<AdventureDto> gatherWorldFacts(@PathVariable String id) {
         try {
-            return ResponseEntity.ok(AdventureDto.from(adventureService.retryWorldFactGathering(id)));
+            return ResponseEntity.ok(AdventureDto.from(adventureService.gatherWorldFacts(id)));
         } catch (NoSuchElementException e) {
             return ResponseEntity.notFound().build();
         } catch (IllegalStateException e) {

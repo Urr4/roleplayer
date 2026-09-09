@@ -52,8 +52,8 @@ export const stopAdventure = (id: string) => api.post<AdventureDto>(`/adventures
 export const pushWorldFacts = (id: string, factsText: string) =>
   api.post<AdventureDto>(`/adventures/${id}/world-facts/push`, { factsText }).then(r => r.data);
 
-export const retryWorldFacts = (id: string) =>
-  api.post<AdventureDto>(`/adventures/${id}/world-facts/retry`).then(r => r.data);
+export const gatherWorldFacts = (id: string) =>
+  api.post<AdventureDto>(`/adventures/${id}/world-facts/gather`).then(r => r.data);
 
 export const deleteAdventure = (id: string) => api.delete(`/adventures/${id}`);
 

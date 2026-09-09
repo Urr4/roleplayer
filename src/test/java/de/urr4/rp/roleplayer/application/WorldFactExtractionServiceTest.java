@@ -15,7 +15,6 @@ import de.urr4.rp.roleplayer.domain.port.out.VaultRepository;
 import de.urr4.rp.roleplayer.domain.port.out.WorldBuildingClient;
 import de.urr4.rp.roleplayer.domain.port.out.WorldRepository;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
 import java.util.List;
@@ -31,48 +30,7 @@ import static org.mockito.Mockito.when;
 class WorldFactExtractionServiceTest {
 
     @Test
-    void retryPendingResolvesRecordinglessAdventuresEvenWhenOllamaIsUnreachable() {
-        AdventureRepository adventureRepository = mock(AdventureRepository.class);
-        ChronicleRepository chronicleRepository = mock(ChronicleRepository.class);
-        WorldRepository worldRepository = mock(WorldRepository.class);
-        WorldBuildingClient worldBuildingClient = mock(WorldBuildingClient.class);
-        VaultRepository vaultRepository = mock(VaultRepository.class);
-        RecordingService recordingService = mock(RecordingService.class);
-
-        String adventureId = "adv-1";
-        String chronicleId = "chr-1";
-        String worldId = "world-1";
-
-        Adventure pendingAdventure = new Adventure(adventureId, chronicleId, "Session 1", AdventureStatus.COMPLETED,
-                Instant.now(), Instant.now(), Instant.now(), WorldExtractionStatus.PENDING, null, null);
-
-        when(adventureRepository.findAll()).thenReturn(List.of(pendingAdventure));
-        when(chronicleRepository.findById(chronicleId))
-                .thenReturn(Optional.of(new Chronicle(chronicleId, "Chronicle", Instant.now(), worldId)));
-        when(worldRepository.findById(worldId))
-                .thenReturn(Optional.of(new World(worldId, "World", "world", Instant.now())));
-        when(recordingService.listRecordings(adventureId)).thenReturn(List.of());
-        when(adventureRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        // Ollama is unreachable - this must not prevent resolving adventures
-        // that don't need it at all (e.g. no recordings were ever made).
-        when(worldBuildingClient.isReachable()).thenReturn(false);
-
-        WorldFactExtractionService service = new WorldFactExtractionService(adventureRepository, chronicleRepository,
-                worldRepository, worldBuildingClient, vaultRepository, recordingService);
-
-        service.retryPending();
-
-        ArgumentCaptor<Adventure> savedCaptor = ArgumentCaptor.forClass(Adventure.class);
-        verify(adventureRepository).save(savedCaptor.capture());
-        Adventure saved = savedCaptor.getValue();
-
-        assertThat(saved.worldExtractionStatus()).isEqualTo(WorldExtractionStatus.DRAFT_READY);
-        assertThat(saved.draftFactsText()).isEqualTo("");
-        verify(worldBuildingClient, never()).summarizeFacts(any(), any(), any(), any(), any());
-    }
-
-    @Test
-    void onAdventureStoppedCallsOllamaDirectlyWithoutAReachabilityPreflight() {
+    void gatherWorldFactsResolvesRecordinglessAdventureAdventuresEvenWhenOllamaIsUnreachable() {
         AdventureRepository adventureRepository = mock(AdventureRepository.class);
         ChronicleRepository chronicleRepository = mock(ChronicleRepository.class);
         WorldRepository worldRepository = mock(WorldRepository.class);
@@ -85,13 +43,81 @@ class WorldFactExtractionServiceTest {
         String worldId = "world-1";
         String recordingId = "rec-1";
 
-        Adventure stoppedAdventure = new Adventure(adventureId, chronicleId, "Session 1", AdventureStatus.COMPLETED,
-                Instant.now(), Instant.now(), Instant.now(), WorldExtractionStatus.PENDING, null, null);
+        Adventure adventure = new Adventure(adventureId, chronicleId, "Session 1", AdventureStatus.COMPLETED,
+                Instant.now(), Instant.now(), Instant.now(), WorldExtractionStatus.NONE, null, null);
+        Recording recording = new Recording(recordingId, chronicleId, adventureId, RecordingSource.MICROPHONE,
+                RecordingStatus.AWAITING_ASR, Instant.now(), Instant.now(), "audio.webm", null);
+
+        when(adventureRepository.findById(adventureId)).thenReturn(Optional.of(adventure));
+        when(chronicleRepository.findById(chronicleId))
+                .thenReturn(Optional.of(new Chronicle(chronicleId, "Chronicle", Instant.now(), worldId)));
+        when(worldRepository.findById(worldId))
+                .thenReturn(Optional.of(new World(worldId, "World", "world", Instant.now())));
+        // A recording exists (so the button is enabled), but it hasn't been
+        // transcribed yet (e.g. still AWAITING_ASR) - there's simply no
+        // transcript text to summarize yet, independent of whether Ollama is
+        // reachable at all.
+        when(recordingService.listRecordings(adventureId)).thenReturn(List.of(recording));
+        when(recordingService.getAdventureTranscript(adventureId)).thenReturn(List.of());
+        when(adventureRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(worldBuildingClient.isReachable()).thenReturn(false);
+
+        WorldFactExtractionService service = new WorldFactExtractionService(adventureRepository, chronicleRepository,
+                worldRepository, worldBuildingClient, vaultRepository, recordingService);
+
+        Adventure result = service.gatherWorldFacts(adventureId);
+
+        assertThat(result.worldExtractionStatus()).isEqualTo(WorldExtractionStatus.PENDING);
+        verify(worldBuildingClient, never()).summarizeFacts(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void gatherWorldFactsThrowsWhenNoRecordingsExist() {
+        AdventureRepository adventureRepository = mock(AdventureRepository.class);
+        ChronicleRepository chronicleRepository = mock(ChronicleRepository.class);
+        WorldRepository worldRepository = mock(WorldRepository.class);
+        WorldBuildingClient worldBuildingClient = mock(WorldBuildingClient.class);
+        VaultRepository vaultRepository = mock(VaultRepository.class);
+        RecordingService recordingService = mock(RecordingService.class);
+
+        String adventureId = "adv-1";
+        Adventure adventure = new Adventure(adventureId, "chr-1", "Session 1", AdventureStatus.ACTIVE,
+                Instant.now(), Instant.now(), null, WorldExtractionStatus.NONE, null, null);
+
+        when(adventureRepository.findById(adventureId)).thenReturn(Optional.of(adventure));
+        when(recordingService.listRecordings(adventureId)).thenReturn(List.of());
+
+        WorldFactExtractionService service = new WorldFactExtractionService(adventureRepository, chronicleRepository,
+                worldRepository, worldBuildingClient, vaultRepository, recordingService);
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> service.gatherWorldFacts(adventureId));
+    }
+
+    @Test
+    void gatherWorldFactsCallsOllamaDirectlyWithoutAReachabilityPreflightAndWorksWhileAdventureIsStillActive() {
+        AdventureRepository adventureRepository = mock(AdventureRepository.class);
+        ChronicleRepository chronicleRepository = mock(ChronicleRepository.class);
+        WorldRepository worldRepository = mock(WorldRepository.class);
+        WorldBuildingClient worldBuildingClient = mock(WorldBuildingClient.class);
+        VaultRepository vaultRepository = mock(VaultRepository.class);
+        RecordingService recordingService = mock(RecordingService.class);
+
+        String adventureId = "adv-1";
+        String chronicleId = "chr-1";
+        String worldId = "world-1";
+        String recordingId = "rec-1";
+
+        // Gathering must be usable at any time, not just once the adventure
+        // has ended - here the adventure is still ACTIVE.
+        Adventure adventure = new Adventure(adventureId, chronicleId, "Session 1", AdventureStatus.ACTIVE,
+                Instant.now(), Instant.now(), null, WorldExtractionStatus.NONE, null, null);
         Recording recording = new Recording(recordingId, chronicleId, adventureId, RecordingSource.MICROPHONE,
                 RecordingStatus.DONE, Instant.now(), Instant.now(), "audio.webm", "transcript.json");
         TranscriptSegment segment = new TranscriptSegment("seg-1", recordingId, "Spieler 1", 0L, 1000L,
                 "Wir betreten die Taverne.", Instant.now());
 
+        when(adventureRepository.findById(adventureId)).thenReturn(Optional.of(adventure));
         when(chronicleRepository.findById(chronicleId))
                 .thenReturn(Optional.of(new Chronicle(chronicleId, "Chronicle", Instant.now(), worldId)));
         when(worldRepository.findById(worldId))
@@ -104,17 +130,14 @@ class WorldFactExtractionServiceTest {
         WorldFactExtractionService service = new WorldFactExtractionService(adventureRepository, chronicleRepository,
                 worldRepository, worldBuildingClient, vaultRepository, recordingService);
 
-        service.onAdventureStopped(stoppedAdventure);
+        Adventure result = service.gatherWorldFacts(adventureId);
 
         // No preflight reachability probe - the real endpoint is called
         // directly, exactly like the mealplaner backend does.
         verify(worldBuildingClient, never()).isReachable();
         verify(worldBuildingClient).summarizeFacts(any(), any(), any(), any(), any());
 
-        ArgumentCaptor<Adventure> savedCaptor = ArgumentCaptor.forClass(Adventure.class);
-        verify(adventureRepository, org.mockito.Mockito.atLeastOnce()).save(savedCaptor.capture());
-        Adventure lastSaved = savedCaptor.getValue();
-        assertThat(lastSaved.worldExtractionStatus()).isEqualTo(WorldExtractionStatus.DRAFT_READY);
-        assertThat(lastSaved.draftFactsText()).isEqualTo("Die Gruppe betrat eine Taverne.");
+        assertThat(result.worldExtractionStatus()).isEqualTo(WorldExtractionStatus.DRAFT_READY);
+        assertThat(result.draftFactsText()).isEqualTo("Die Gruppe betrat eine Taverne.");
     }
 }

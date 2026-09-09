@@ -85,7 +85,7 @@ import {
   replaceCharacterSheet,
   resumeRecording,
   retryRecordingTranscription,
-  retryWorldFacts,
+  gatherWorldFacts,
   startAdventure,
   startRecording,
   stopAdventure,
@@ -179,7 +179,7 @@ export default function ChronicleTab({
   const [factsDraftText, setFactsDraftText] = useState<Record<string, string>>({});
   const [pushingFactsAdventureId, setPushingFactsAdventureId] = useState<string | null>(null);
   const [factsPushError, setFactsPushError] = useState<Record<string, string>>({});
-  const [retryingFactsAdventureId, setRetryingFactsAdventureId] = useState<string | null>(null);
+  const [gatheringFactsAdventureId, setGatheringFactsAdventureId] = useState<string | null>(null);
 
   const [serviceStatus, setServiceStatus] = useState<ServiceStatusDto | null>(null);
   const [retryingTranscriptionId, setRetryingTranscriptionId] = useState<string | null>(null);
@@ -401,20 +401,6 @@ export default function ChronicleTab({
     });
   }, [adventures]);
 
-  // Poll while any adventure is still waiting on transcription/phase-1 LLM
-  // extraction, so the spinner ("Waiting on facts") automatically switches to
-  // the editable textarea once the draft becomes available.
-  useEffect(() => {
-    const hasPending = adventures.some(adventure =>
-      adventure.worldExtractionStatus === 'PENDING'
-      || (adventure.status === 'COMPLETED' && adventure.worldExtractionStatus === 'NONE' && !!activeChronicle?.worldSlug));
-    if (!hasPending) return;
-    const interval = window.setInterval(() => {
-      void refreshAdventures();
-    }, 5000);
-    return () => window.clearInterval(interval);
-  }, [adventures, refreshAdventures, activeChronicle?.worldSlug]);
-
   useEffect(
     () => () => {
       releaseMicrophone();
@@ -598,25 +584,25 @@ export default function ChronicleTab({
     }
   };
 
-  const handleRetryFactGathering = async (adventureId: string) => {
-    setRetryingFactsAdventureId(adventureId);
+  const handleGatherWorldFacts = async (adventureId: string) => {
+    setGatheringFactsAdventureId(adventureId);
     setFactsPushError(previous => {
       const rest = { ...previous };
       delete rest[adventureId];
       return rest;
     });
     try {
-      await retryWorldFacts(adventureId);
+      await gatherWorldFacts(adventureId);
       await refreshAdventures();
     } catch (err) {
       const message = axios.isAxiosError(err)
         ? err.response?.data?.message ?? err.message
         : err instanceof Error
           ? err.message
-          : 'Retrying fact collection failed.';
+          : 'Gathering world facts failed.';
       setFactsPushError(previous => ({ ...previous, [adventureId]: message }));
     } finally {
-      setRetryingFactsAdventureId(null);
+      setGatheringFactsAdventureId(null);
     }
   };
 
@@ -1360,50 +1346,52 @@ export default function ChronicleTab({
 
                             {(() => {
                               const expandedAdventure = adventures.find(adventure => adventure.id === expandedAdventureId);
-                              if (!expandedAdventure || expandedAdventure.worldExtractionStatus === undefined
-                                || expandedAdventure.worldExtractionStatus === 'NONE') {
+                              if (!expandedAdventure) {
                                 return null;
                               }
                               const status = expandedAdventure.worldExtractionStatus;
                               const isPushing = pushingFactsAdventureId === expandedAdventure.id || status === 'PUSHING';
-                              const isRetryingFacts = retryingFactsAdventureId === expandedAdventure.id;
+                              const isGatheringFacts = gatheringFactsAdventureId === expandedAdventure.id;
                               const pushError = factsPushError[expandedAdventure.id];
-                              const canRetryFacts = expandedAdventure.status === 'COMPLETED' && serviceStatus?.ollamaReachable === true;
+                              const hasRecordings = adventureRecordings.length > 0;
+                              const canGatherFacts = hasRecordings && serviceStatus?.ollamaReachable === true;
+                              const gatherTooltip = !hasRecordings
+                                ? 'No recordings/transcriptions exist yet for this adventure.'
+                                : serviceStatus?.ollamaReachable === false
+                                  ? 'Ollama is unreachable — cannot gather world facts right now.'
+                                  : 'Gather world facts from the transcriptions recorded so far';
                               return (
                                 <Box>
                                   <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
                                     <Typography variant="subtitle2" color="text.secondary">
                                       World Facts
                                     </Typography>
-                                    {expandedAdventure.status === 'COMPLETED' && (
-                                      <Tooltip
-                                        title={
-                                          serviceStatus?.ollamaReachable === false
-                                            ? 'Ollama is unreachable — cannot retry fact collection right now.'
-                                            : 'Re-run fact collection for this adventure'
-                                        }
-                                      >
-                                        <span>
-                                          <Button
-                                            size="small"
-                                            startIcon={
-                                              isRetryingFacts ? <CircularProgress size={14} color="inherit" /> : <RefreshIcon fontSize="small" />
-                                            }
-                                            disabled={!canRetryFacts || isRetryingFacts || isPushing}
-                                            onClick={() => void handleRetryFactGathering(expandedAdventure.id)}
-                                          >
-                                            {isRetryingFacts ? 'Retrying…' : 'Retry fact collection'}
-                                          </Button>
-                                        </span>
-                                      </Tooltip>
-                                    )}
+                                    <Tooltip title={gatherTooltip}>
+                                      <span>
+                                        <Button
+                                          size="small"
+                                          startIcon={
+                                            isGatheringFacts ? <CircularProgress size={14} color="inherit" /> : <RefreshIcon fontSize="small" />
+                                          }
+                                          disabled={!canGatherFacts || isGatheringFacts || isPushing}
+                                          onClick={() => void handleGatherWorldFacts(expandedAdventure.id)}
+                                        >
+                                          {isGatheringFacts ? 'Gathering…' : 'Gather World-Facts'}
+                                        </Button>
+                                      </span>
+                                    </Tooltip>
                                     {serviceStatus && !serviceStatus.ollamaReachable && (
                                       <Typography variant="caption" color="warning.main">
                                         Ollama unreachable
                                       </Typography>
                                     )}
                                   </Stack>
-                                  {status === 'PENDING' ? (
+                                  {status === undefined || status === 'NONE' ? (
+                                    <Typography variant="caption" color="text.secondary">
+                                      No world facts gathered yet. Click "Gather World-Facts" once recordings/transcriptions
+                                      exist and Ollama is reachable.
+                                    </Typography>
+                                  ) : status === 'PENDING' ? (
                                     <Stack direction="row" spacing={1.5} alignItems="center" sx={{ py: 1 }}>
                                       <CircularProgress size={18} />
                                       <Typography color="text.secondary">Waiting on facts</Typography>

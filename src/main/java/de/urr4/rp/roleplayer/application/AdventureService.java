@@ -82,22 +82,11 @@ public class AdventureService {
     public Adventure stopAdventure(String id) {
         Adventure adventure = adventureRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Adventure not found: " + id));
-        // Set worldExtractionStatus synchronously (before kicking off the
-        // @Async gathering below) whenever a world is linked, so a client
-        // that reloads the adventure list right after this call already sees
-        // PENDING instead of racing the async task and observing a stale
-        // NONE that it has no reason to poll away from.
-        boolean worldLinked = chronicleRepository.findById(adventure.chronicleId())
-                .map(chronicle -> chronicle.worldId() != null)
-                .orElse(false);
-        WorldExtractionStatus initialStatus = worldLinked ? WorldExtractionStatus.PENDING : adventure.worldExtractionStatus();
         Adventure stopped = new Adventure(
                 adventure.id(), adventure.chronicleId(), adventure.name(), AdventureStatus.COMPLETED,
-                adventure.createdAt(), adventure.startedAt(), Instant.now(), initialStatus, adventure.worldExtractionError(),
-                adventure.draftFactsText());
-        Adventure saved = adventureRepository.save(stopped);
-        worldFactExtractionService.onAdventureStopped(saved);
-        return saved;
+                adventure.createdAt(), adventure.startedAt(), Instant.now(), adventure.worldExtractionStatus(),
+                adventure.worldExtractionError(), adventure.draftFactsText());
+        return adventureRepository.save(stopped);
     }
 
     /**
@@ -111,13 +100,15 @@ public class AdventureService {
     }
 
     /**
-     * Manually re-triggers phase 1 world-fact gathering for a single
-     * completed adventure - used by the "Retry fact collection" button,
-     * which the frontend only enables once the adventure is COMPLETED and
-     * Ollama is reachable.
+     * Manually triggers phase 1 world-fact gathering for an adventure - used
+     * by the "Gather World-Facts" button. Unlike the previous automatic
+     * behavior (triggered on adventure stop), this is never invoked
+     * automatically: the user decides when to gather facts from whatever
+     * transcriptions exist so far, and can re-run it any time (e.g. after
+     * Ollama was unreachable, or once new recordings/transcripts appear).
      */
-    public Adventure retryWorldFactGathering(String id) {
-        return worldFactExtractionService.retryFactGathering(id);
+    public Adventure gatherWorldFacts(String id) {
+        return worldFactExtractionService.gatherWorldFacts(id);
     }
 
     @Transactional

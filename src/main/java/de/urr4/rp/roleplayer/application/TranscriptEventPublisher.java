@@ -1,6 +1,8 @@
 package de.urr4.rp.roleplayer.application;
 
 import de.urr4.rp.roleplayer.domain.model.TranscriptSegment;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -18,6 +20,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 @Component
 public class TranscriptEventPublisher {
+
+    private static final Logger log = LoggerFactory.getLogger(TranscriptEventPublisher.class);
 
     // 0L disables the emitter's own timeout — subscriptions live until the
     // client disconnects (tab closed) or the emitter completes/errors.
@@ -47,8 +51,22 @@ public class TranscriptEventPublisher {
             try {
                 emitter.send(SseEmitter.event().name("segment").data(segment));
             } catch (IOException | IllegalStateException e) {
-                emitter.completeWithError(e);
                 emitters.remove(emitter);
+                // Best-effort only: the emitter's underlying AsyncContext may
+                // already be in an errored/completed state (e.g. the browser
+                // tab was closed or the connection dropped), in which case
+                // Tomcat itself throws from completeWithError() ("a
+                // non-container thread attempted to use the AsyncContext
+                // after an error had occurred..."). Publishing a live
+                // transcript update is a non-essential side effect of
+                // recording processing, so any failure here - including from
+                // this cleanup call - must never propagate and fail the
+                // caller's transcription/finalization work.
+                try {
+                    emitter.completeWithError(e);
+                } catch (RuntimeException cleanupError) {
+                    log.debug("Failed to complete already-broken SSE emitter for chronicle {}", chronicleId, cleanupError);
+                }
             }
         }
     }

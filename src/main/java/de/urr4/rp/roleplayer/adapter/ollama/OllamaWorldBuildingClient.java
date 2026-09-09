@@ -394,6 +394,14 @@ public class OllamaWorldBuildingClient implements WorldBuildingClient {
                 - Wikilinks ausschließlich auf andere Notizen DERSELBEN Welt, niemals auf
                   Notizen einer anderen Welt
                 - Übernimm nur, was im Fakten-Text steht; keine Spekulationen
+                - WICHTIG: Der Fakten-Text wurde bereits vom Spielleiter geprüft und
+                  korrigiert - sein Wortlaut ist final. Verändere ihn NICHT. Übernimm
+                  Sätze/Formulierungen wortwörtlich in die jeweilige Notiz. Erlaubt ist
+                  ausschließlich: (a) den Text auf mehrere Notizen aufzuteilen, (b)
+                  Entity-Namen mit [[Wikilinks]] zu umschließen, (c) Überschriften/
+                  Markdown-Formatierung zu ergänzen. NICHT erlaubt: Umformulieren,
+                  Zusammenfassen, Kürzen, Paraphrasieren oder Hinzufügen von
+                  Informationen, die nicht wortwörtlich im Fakten-Text stehen
                 - Wenn nichts Relevantes vorhanden ist, antworte mit []
 
                 Chronik: %s

@@ -85,6 +85,21 @@ class OllamaWorldBuildingClientTest {
     }
 
     @Test
+    void mergePromptForbidsRewordingTheReviewedFactsTextAndOnlyAllowsAddingObsidianStructure() {
+        OllamaWorldBuildingClient client = new OllamaWorldBuildingClient("http://localhost:11434", "llama3.2", new ObjectMapper());
+
+        String prompt = client.buildMergePrompt("Testwelt", "test-welt", "Chronik", "Abenteuer", "Fakten...", java.util.List.of());
+
+        // The draft facts text was already reviewed/edited by the user - the
+        // merge step must only add Obsidian structure (splitting into notes,
+        // wikilinks, headings) on top of it, never rewrite/summarize/shorten
+        // the wording itself, otherwise reviewed facts get silently altered.
+        assertTrue(prompt.contains("Verändere ihn NICHT"));
+        assertTrue(prompt.contains("wortwörtlich"));
+        assertTrue(prompt.contains("Umformulieren"));
+    }
+
+    @Test
     void mergeFactsIntoVaultDoesNotConstrainTheFirstAttemptWithAJsonSchema() throws IOException, InterruptedException {
         BlockingQueue<String> capturedBodies = new ArrayBlockingQueue<>(1);
         server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);

@@ -305,7 +305,7 @@ public class OllamaWorldBuildingClient implements WorldBuildingClient {
                 """.formatted(worldName, chronicleName, adventureName, transcriptText);
     }
 
-    private String buildMergePrompt(String worldName, String worldSlug, String chronicleName, String adventureName,
+    String buildMergePrompt(String worldName, String worldSlug, String chronicleName, String adventureName,
                                     String factsText, List<String> existingNoteSummaries) {
         String summaries = existingNoteSummaries == null || existingNoteSummaries.isEmpty()
                 ? "Keine bestehenden Notizen."
@@ -323,9 +323,24 @@ public class OllamaWorldBuildingClient implements WorldBuildingClient {
                 Regeln:
                 - Verwende nur relative Pfade innerhalb dieser Welt, niemals führendes / und niemals ..
                 - Die Welt heißt "%s" und hat den Slug "%s"
+                - "path" darf NICHT mit dem Welt-Slug ("%s") oder "content/worlds/" beginnen -
+                  der Ordner der Welt wird automatisch vorangestellt. Beginne "path" direkt mit
+                  dem Unterordner, z.B. "Locations/Paspaturia", NICHT "%s/Locations/Paspaturia"
+                - "path" MUSS auf ".md" enden, z.B. "Locations/Paspaturia.md"
                 - Nutze sinnvolle Unterordner wie Locations/, People/, Events/, Culture/
                 - content muss gültiges Obsidian-Markdown sein
-                - Wikilinks nur auf andere Notizen derselben Welt
+                - Dies ist ein Obsidian-Vault: JEDE Erwähnung eines wichtigen Entities
+                  (Person, Ort, Organisation, Gegenstand, Ereignis), das eine eigene Notiz
+                  hat oder in dieser Antwort bekommt, MUSS als Obsidian-Wikilink verlinkt
+                  werden - und zwar bei JEDER Erwähnung in JEDER Notiz, nicht nur beim
+                  ersten Vorkommen
+                - Verwende dafür AUSSCHLIESSLICH die Doppel-Klammer-Syntax [[Notiztitel]]
+                  (optional mit Anzeigetext [[Notiztitel|Anzeigetext]]) - NIEMALS die
+                  Markdown-Link-Syntax [Text](Pfad) für interne Verweise
+                - Nutze für den Wikilink den Titel der Ziel-Notiz (z.B. [[Paspaturia]]),
+                  nicht den vollen Pfad
+                - Wikilinks ausschließlich auf andere Notizen DERSELBEN Welt, niemals auf
+                  Notizen einer anderen Welt
                 - Übernimm nur, was im Fakten-Text steht; keine Spekulationen
                 - Wenn nichts Relevantes vorhanden ist, antworte mit []
 
@@ -337,7 +352,7 @@ public class OllamaWorldBuildingClient implements WorldBuildingClient {
 
                 Geprüfter Fakten-Text:
                 %s
-                """.formatted(worldName, worldSlug, chronicleName, adventureName, summaries, factsText);
+                """.formatted(worldName, worldSlug, worldSlug, worldSlug, chronicleName, adventureName, summaries, factsText);
     }
 
     private record OllamaGenerateResponse(String response) {

@@ -170,6 +170,26 @@ public class WorldFactExtractionService {
         if (sanitized.startsWith("/") || sanitized.contains("..")) {
             return null;
         }
+        // The LLM is instructed not to prefix its path with the world slug
+        // (the folder is added here), but weaker models sometimes do it
+        // anyway - strip a redundant leading "{worldSlug}/" or
+        // "content/worlds/{worldSlug}/" so we don't end up nesting the
+        // world folder inside itself (e.g. content/worlds/x/x/Note.md).
+        String worldPrefix = worldSlug + "/";
+        if (sanitized.startsWith("content/worlds/" + worldPrefix)) {
+            sanitized = sanitized.substring(("content/worlds/" + worldPrefix).length());
+        } else if (sanitized.startsWith(worldPrefix)) {
+            sanitized = sanitized.substring(worldPrefix.length());
+        }
+        if (sanitized.isBlank()) return null;
+        // Quartz (and Obsidian) only treat ".md" files as note content -
+        // anything else is served as an opaque static asset and never
+        // rendered/linked, silently making the pushed note invisible on the
+        // site. The model is instructed to include the extension, but
+        // enforce it defensively in case it forgets.
+        if (!sanitized.toLowerCase(java.util.Locale.ROOT).endsWith(".md")) {
+            sanitized = sanitized + ".md";
+        }
         String fullPath = "content/worlds/" + worldSlug + "/" + sanitized;
         return new VaultFileWrite(fullPath, change.markdownContent());
     }

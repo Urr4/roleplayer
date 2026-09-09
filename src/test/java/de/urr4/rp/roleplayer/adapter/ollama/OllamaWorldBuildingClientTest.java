@@ -49,4 +49,19 @@ class OllamaWorldBuildingClientTest {
         assertEquals("test-welt/Locations/Paspaturia", changes.get(1).relativePath());
         assertTrue(changes.get(0).markdownContent().contains("[Paspaturia](test-welt/Locations/Paspaturia)"));
     }
+
+    @Test
+    void mergePromptMandatesObsidianWikilinkSyntaxForEveryMentionOfLinkableEntities() {
+        OllamaWorldBuildingClient client = new OllamaWorldBuildingClient("http://localhost:11434", "llama3.2", new ObjectMapper());
+
+        String prompt = client.buildMergePrompt("Testwelt", "test-welt", "Chronik", "Abenteuer", "Fakten...", java.util.List.of());
+
+        // Must require the real Obsidian [[Title]] wikilink syntax (not
+        // markdown [text](path) links) for every occurrence of a linkable
+        // entity, not just the first mention - otherwise the vault stops
+        // being a proper Obsidian graph of cross-referenced notes.
+        assertTrue(prompt.contains("[[Notiztitel]]"));
+        assertTrue(prompt.contains("JEDER Erwähnung"));
+        assertTrue(prompt.contains("NIEMALS die"));
+    }
 }

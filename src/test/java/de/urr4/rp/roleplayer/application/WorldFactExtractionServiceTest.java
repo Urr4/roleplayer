@@ -7,6 +7,8 @@ import de.urr4.rp.roleplayer.domain.model.Recording;
 import de.urr4.rp.roleplayer.domain.model.RecordingSource;
 import de.urr4.rp.roleplayer.domain.model.RecordingStatus;
 import de.urr4.rp.roleplayer.domain.model.TranscriptSegment;
+import de.urr4.rp.roleplayer.domain.model.VaultFileWrite;
+import de.urr4.rp.roleplayer.domain.model.VaultNoteChange;
 import de.urr4.rp.roleplayer.domain.model.World;
 import de.urr4.rp.roleplayer.domain.model.WorldExtractionStatus;
 import de.urr4.rp.roleplayer.domain.port.out.AdventureRepository;
@@ -15,6 +17,7 @@ import de.urr4.rp.roleplayer.domain.port.out.VaultRepository;
 import de.urr4.rp.roleplayer.domain.port.out.WorldBuildingClient;
 import de.urr4.rp.roleplayer.domain.port.out.WorldRepository;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
 import java.util.List;
@@ -139,5 +142,53 @@ class WorldFactExtractionServiceTest {
 
         assertThat(result.worldExtractionStatus()).isEqualTo(WorldExtractionStatus.DRAFT_READY);
         assertThat(result.draftFactsText()).isEqualTo("Die Gruppe betrat eine Taverne.");
+    }
+
+    @Test
+    void pushFactsToVaultStripsRedundantWorldSlugPrefixAndEnforcesMdExtension() {
+        AdventureRepository adventureRepository = mock(AdventureRepository.class);
+        ChronicleRepository chronicleRepository = mock(ChronicleRepository.class);
+        WorldRepository worldRepository = mock(WorldRepository.class);
+        WorldBuildingClient worldBuildingClient = mock(WorldBuildingClient.class);
+        VaultRepository vaultRepository = mock(VaultRepository.class);
+        RecordingService recordingService = mock(RecordingService.class);
+
+        String adventureId = "adv-1";
+        String chronicleId = "chr-1";
+        String worldId = "world-1";
+        String worldSlug = "test-welt";
+
+        Adventure adventure = new Adventure(adventureId, chronicleId, "Session 1", AdventureStatus.COMPLETED,
+                Instant.now(), Instant.now(), Instant.now(), WorldExtractionStatus.DRAFT_READY, null, "Fakten...");
+
+        when(adventureRepository.findById(adventureId)).thenReturn(Optional.of(adventure));
+        when(chronicleRepository.findById(chronicleId))
+                .thenReturn(Optional.of(new Chronicle(chronicleId, "Chronicle", Instant.now(), worldId)));
+        when(worldRepository.findById(worldId))
+                .thenReturn(Optional.of(new World(worldId, "Testwelt", worldSlug, Instant.now())));
+        when(vaultRepository.listNotes(any())).thenReturn(List.of());
+        when(adventureRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        // The model was told not to repeat the world slug and to always add
+        // ".md", but reproduces the exact malformed output observed live:
+        // a path prefixed with the world slug again, and no ".md" suffix.
+        when(worldBuildingClient.mergeFactsIntoVault(any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(new VaultNoteChange(worldSlug + "/Geografie", "Geografie", "# Geografie", true)));
+
+        WorldFactExtractionService service = new WorldFactExtractionService(adventureRepository, chronicleRepository,
+                worldRepository, worldBuildingClient, vaultRepository, recordingService);
+
+        Adventure result = service.pushFactsToVault(adventureId, "Fakten...");
+
+        ArgumentCaptor<List<VaultFileWrite>> writesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(vaultRepository).commitChanges(any(), writesCaptor.capture());
+        List<VaultFileWrite> writes = writesCaptor.getValue();
+
+        assertThat(writes).hasSize(1);
+        // Must NOT be "content/worlds/test-welt/test-welt/Geografie" (the
+        // duplicated-folder bug) and must end in ".md" (Quartz/Obsidian only
+        // render ".md" files - anything else is served as an opaque static
+        // asset and never shows up on the site).
+        assertThat(writes.get(0).path()).isEqualTo("content/worlds/test-welt/Geografie.md");
+        assertThat(result.worldExtractionStatus()).isEqualTo(WorldExtractionStatus.DONE);
     }
 }

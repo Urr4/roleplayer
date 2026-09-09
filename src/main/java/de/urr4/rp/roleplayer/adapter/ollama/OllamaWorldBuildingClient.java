@@ -73,7 +73,9 @@ public class OllamaWorldBuildingClient implements WorldBuildingClient {
                 ))
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, (request, clientResponse) -> {
-                    throw new IllegalStateException("Ollama world-fact summarization failed with HTTP " + clientResponse.getStatusCode().value());
+                    String errorBody = new String(clientResponse.getBody().readAllBytes());
+                    throw new IllegalStateException("Ollama world-fact summarization failed with HTTP "
+                            + clientResponse.getStatusCode().value() + ": " + errorBody);
                 })
                 .body(OllamaGenerateResponse.class);
         if (response == null || response.response() == null || response.response().isBlank()) {
@@ -94,7 +96,9 @@ public class OllamaWorldBuildingClient implements WorldBuildingClient {
                 ))
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, (request, clientResponse) -> {
-                    throw new IllegalStateException("Ollama vault merge failed with HTTP " + clientResponse.getStatusCode().value());
+                    String errorBody = new String(clientResponse.getBody().readAllBytes());
+                    throw new IllegalStateException("Ollama vault merge failed with HTTP "
+                            + clientResponse.getStatusCode().value() + ": " + errorBody);
                 })
                 .body(OllamaGenerateResponse.class);
         if (response == null || response.response() == null || response.response().isBlank()) {

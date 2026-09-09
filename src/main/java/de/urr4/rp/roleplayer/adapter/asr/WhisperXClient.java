@@ -1,5 +1,6 @@
 package de.urr4.rp.roleplayer.adapter.asr;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import de.urr4.rp.roleplayer.domain.model.TranscriptSegment;
 import de.urr4.rp.roleplayer.domain.port.out.AsrUnavailableException;
 import de.urr4.rp.roleplayer.domain.port.out.TranscriptionClient;
@@ -32,9 +33,11 @@ public class WhisperXClient implements TranscriptionClient {
 
     private final RestClient restClient;
     private final RestClient healthCheckRestClient;
+    private final ObjectMapper objectMapper;
     private final String model;
 
-    public WhisperXClient(@Value("${asr.base-url}") String baseUrl, @Value("${asr.model:large-v3}") String model) {
+    public WhisperXClient(@Value("${asr.base-url}") String baseUrl, @Value("${asr.model:large-v3}") String model,
+                          ObjectMapper objectMapper) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(CONNECT_TIMEOUT);
         requestFactory.setReadTimeout(READ_TIMEOUT);
@@ -52,6 +55,7 @@ public class WhisperXClient implements TranscriptionClient {
                 .requestFactory(healthCheckRequestFactory)
                 .build();
 
+        this.objectMapper = objectMapper;
         this.model = model;
     }
 
@@ -70,22 +74,33 @@ public class WhisperXClient implements TranscriptionClient {
 
         WhisperXResponse response;
         try {
-            response = restClient.post()
+            // WhisperX (and reverse proxies in front of it) sometimes send
+            // the JSON body with a wrong/generic Content-Type such as
+            // application/octet-stream. Spring's message converters pick a
+            // converter based on that header, so relying on .body(Class) can
+            // fail with "Error while extracting response" even though the
+            // body is perfectly valid JSON. Read the raw text ourselves and
+            // parse it explicitly instead, regardless of the declared type.
+            String rawBody = restClient.post()
                     .uri("/transcribe")
                     .contentType(MediaType.MULTIPART_FORM_DATA)
                     .body(body)
                     .retrieve()
                     .onStatus(HttpStatusCode::isError, (request, clientResponse) -> {
-                        throw new IllegalStateException("WhisperX transcription failed for recording %s with HTTP %s"
-                                .formatted(recordingId, clientResponse.getStatusCode().value()));
+                        String errorBody = new String(clientResponse.getBody().readAllBytes());
+                        throw new IllegalStateException("WhisperX transcription failed for recording %s with HTTP %s: %s"
+                                .formatted(recordingId, clientResponse.getStatusCode().value(), errorBody));
                     })
-                    .body(WhisperXResponse.class);
+                    .body(String.class);
+            response = rawBody == null || rawBody.isBlank() ? null : objectMapper.readValue(rawBody, WhisperXResponse.class);
         } catch (ResourceAccessException e) {
             // Connection refused/timeout/DNS failure - the WhisperX host is
             // unreachable (e.g. the desktop PC is off/asleep/on a different
             // network) rather than the service itself rejecting the request.
             throw new AsrUnavailableException(
                     "WhisperX ASR service is unreachable for recording " + recordingId, e);
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("Failed to parse WhisperX response for recording " + recordingId + ": " + e.getMessage(), e);
         }
 
         if (response == null || response.segments() == null) {

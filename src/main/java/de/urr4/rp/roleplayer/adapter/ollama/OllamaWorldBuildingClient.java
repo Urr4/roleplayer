@@ -27,6 +27,26 @@ public class OllamaWorldBuildingClient implements WorldBuildingClient {
     private static final Duration READ_TIMEOUT = Duration.ofMinutes(10);
     private static final Duration HEALTH_CHECK_TIMEOUT = Duration.ofSeconds(5);
 
+    // JSON Schema passed as Ollama's "format" - constrains token sampling so
+    // the model can only emit an array of objects matching this exact shape
+    // (see https://ollama.com/blog/structured-outputs). Note: Ollama's
+    // structured-output grammar doesn't support "action" as a plain string
+    // enum well across all backends, so it's kept a plain string and still
+    // validated/normalized ("create".equalsIgnoreCase(...)) after parsing.
+    private static final Map<String, Object> NOTE_CHANGES_JSON_SCHEMA = Map.of(
+            "type", "array",
+            "items", Map.of(
+                    "type", "object",
+                    "properties", Map.of(
+                            "path", Map.of("type", "string"),
+                            "title", Map.of("type", "string"),
+                            "action", Map.of("type", "string"),
+                            "content", Map.of("type", "string")
+                    ),
+                    "required", List.of("path", "title", "action", "content")
+            )
+    );
+
     private final RestClient restClient;
     private final RestClient healthCheckRestClient;
     private final ObjectMapper objectMapper;
@@ -92,7 +112,18 @@ public class OllamaWorldBuildingClient implements WorldBuildingClient {
                 .body(Map.of(
                         "model", model,
                         "prompt", buildMergePrompt(worldName, worldSlug, chronicleName, adventureName, factsText, existingNoteSummaries),
-                        "stream", false
+                        "stream", false,
+                        // Grammar-constrains Ollama's token sampling to the
+                        // given JSON schema, guaranteeing a syntactically and
+                        // structurally valid array of {path,title,action,
+                        // content} objects - independent of how well the
+                        // model would otherwise follow the prompt's format
+                        // instructions. Needs Ollama >= 0.5 (structured
+                        // outputs); the block-scanning repair logic in
+                        // parseNoteChanges() below stays as a defensive
+                        // fallback for older Ollama versions that ignore
+                        // unknown "format" schemas.
+                        "format", NOTE_CHANGES_JSON_SCHEMA
                 ))
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, (request, clientResponse) -> {

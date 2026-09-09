@@ -16,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
@@ -170,17 +171,23 @@ public class WorldFactExtractionService {
         if (sanitized.startsWith("/") || sanitized.contains("..")) {
             return null;
         }
-        // The LLM is instructed not to prefix its path with the world slug
-        // (the folder is added here), but weaker models sometimes do it
-        // anyway - strip a redundant leading "{worldSlug}/" or
-        // "content/worlds/{worldSlug}/" so we don't end up nesting the
-        // world folder inside itself (e.g. content/worlds/x/x/Note.md).
-        String worldPrefix = worldSlug + "/";
-        if (sanitized.startsWith("content/worlds/" + worldPrefix)) {
-            sanitized = sanitized.substring(("content/worlds/" + worldPrefix).length());
-        } else if (sanitized.startsWith(worldPrefix)) {
-            sanitized = sanitized.substring(worldPrefix.length());
+        // The LLM is instructed not to repeat any part of the vault's own
+        // folder structure in "path" (the world folder is added here), but
+        // weaker models keep reinventing variations of it anyway - e.g.
+        // "{worldSlug}/Note.md", "content/worlds/{worldSlug}/Note.md", or
+        // just "worlds/Note.md"/"worlds/{worldSlug}/Note.md". Rather than
+        // enumerating every combination, repeatedly strip a leading segment
+        // whenever it matches "content", "worlds", or the world slug, so
+        // whatever prefix variant the model invents collapses to the same
+        // clean relative path and never nests the world folder inside
+        // itself (e.g. content/worlds/x/x/Note.md or .../x/worlds/Note.md).
+        List<String> segments = new ArrayList<>(List.of(sanitized.split("/")));
+        while (segments.size() > 1 && (segments.get(0).equalsIgnoreCase("content")
+                || segments.get(0).equalsIgnoreCase("worlds")
+                || segments.get(0).equalsIgnoreCase(worldSlug))) {
+            segments.remove(0);
         }
+        sanitized = String.join("/", segments);
         if (sanitized.isBlank()) return null;
         // Quartz (and Obsidian) only treat ".md" files as note content -
         // anything else is served as an opaque static asset and never

@@ -85,7 +85,7 @@ class OllamaWorldBuildingClientTest {
     }
 
     @Test
-    void mergeFactsIntoVaultSendsAJsonSchemaFormatToConstrainOllamasOutput() throws IOException, InterruptedException {
+    void mergeFactsIntoVaultDoesNotConstrainTheFirstAttemptWithAJsonSchema() throws IOException, InterruptedException {
         BlockingQueue<String> capturedBodies = new ArrayBlockingQueue<>(1);
         server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
         server.createContext("/api/generate", exchange -> {
@@ -104,12 +104,52 @@ class OllamaWorldBuildingClientTest {
         client.mergeFactsIntoVault("Testwelt", "test-welt", "Chronik", "Abenteuer", "Fakten...", List.of());
 
         String requestBody = capturedBodies.poll(5, TimeUnit.SECONDS);
+        // The first attempt must stay unconstrained ("format" absent) -
+        // small models produce measurably richer, more detailed note
+        // content without a JSON Schema grammar constraint; the schema is
+        // only applied as a last-resort retry if parsing fails entirely
+        // (see mergeFactsIntoVaultRetriesWithAJsonSchemaOnlyWhenTheFirstAttemptCannotBeParsed).
+        assertTrue(!requestBody.contains("\"format\""));
+    }
+
+    @Test
+    void mergeFactsIntoVaultRetriesWithAJsonSchemaOnlyWhenTheFirstAttemptCannotBeParsed() throws IOException, InterruptedException {
+        BlockingQueue<String> capturedBodies = new ArrayBlockingQueue<>(2);
+        server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        server.createContext("/api/generate", exchange -> {
+            String requestBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            capturedBodies.offer(requestBody);
+            // First call (no "format") returns completely unparseable prose
+            // (no bracket structure at all); second call (with "format")
+            // returns a valid, schema-constrained array.
+            boolean isRetry = requestBody.contains("\"format\"");
+            String response = isRetry
+                    ? "{\"response\":\"[{\\\"path\\\":\\\"Locations/Dorf.md\\\",\\\"title\\\":\\\"Dorf\\\",\\\"action\\\":\\\"create\\\",\\\"content\\\":\\\"# Dorf\\\"}]\"}"
+                    : "{\"response\":\"Es tut mir leid, ich kann das nicht als JSON formatieren.\"}";
+            byte[] body = response.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        OllamaWorldBuildingClient client = new OllamaWorldBuildingClient(
+                "http://localhost:" + server.getAddress().getPort(), "llama3.2", new ObjectMapper());
+
+        var changes = client.mergeFactsIntoVault("Testwelt", "test-welt", "Chronik", "Abenteuer", "Fakten...", List.of());
+
+        assertEquals(1, changes.size());
+        assertEquals("Locations/Dorf.md", changes.getFirst().relativePath());
+        String firstRequestBody = capturedBodies.poll(5, TimeUnit.SECONDS);
+        String secondRequestBody = capturedBodies.poll(5, TimeUnit.SECONDS);
+        assertTrue(!firstRequestBody.contains("\"format\""));
         // "format" must be a JSON Schema object (not just the string "json")
         // so Ollama grammar-constrains its output to a real array-of-objects
         // shape, eliminating malformed/prose-wrapped JSON regardless of the
         // model's own instruction-following ability.
-        assertTrue(requestBody.contains("\"format\""));
-        assertTrue(requestBody.contains("\"type\":\"array\""));
-        assertTrue(requestBody.contains("\"required\":[\"path\",\"title\",\"action\",\"content\"]"));
+        assertTrue(secondRequestBody.contains("\"format\""));
+        assertTrue(secondRequestBody.contains("\"type\":\"array\""));
+        assertTrue(secondRequestBody.contains("\"required\":[\"path\",\"title\",\"action\",\"content\"]"));
     }
 }

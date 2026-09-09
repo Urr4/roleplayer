@@ -191,4 +191,54 @@ class WorldFactExtractionServiceTest {
         assertThat(writes.get(0).path()).isEqualTo("content/worlds/test-welt/Geografie.md");
         assertThat(result.worldExtractionStatus()).isEqualTo(WorldExtractionStatus.DONE);
     }
+
+    @Test
+    void pushFactsToVaultStripsWorldsAndContentPrefixVariantsRegardlessOfOrderOrCombination() {
+        AdventureRepository adventureRepository = mock(AdventureRepository.class);
+        ChronicleRepository chronicleRepository = mock(ChronicleRepository.class);
+        WorldRepository worldRepository = mock(WorldRepository.class);
+        WorldBuildingClient worldBuildingClient = mock(WorldBuildingClient.class);
+        VaultRepository vaultRepository = mock(VaultRepository.class);
+        RecordingService recordingService = mock(RecordingService.class);
+
+        String adventureId = "adv-1";
+        String chronicleId = "chr-1";
+        String worldId = "world-1";
+        String worldSlug = "test-welt";
+
+        Adventure adventure = new Adventure(adventureId, chronicleId, "Session 1", AdventureStatus.COMPLETED,
+                Instant.now(), Instant.now(), Instant.now(), WorldExtractionStatus.DRAFT_READY, null, "Fakten...");
+
+        when(adventureRepository.findById(adventureId)).thenReturn(Optional.of(adventure));
+        when(chronicleRepository.findById(chronicleId))
+                .thenReturn(Optional.of(new Chronicle(chronicleId, "Chronicle", Instant.now(), worldId)));
+        when(worldRepository.findById(worldId))
+                .thenReturn(Optional.of(new World(worldId, "Testwelt", worldSlug, Instant.now())));
+        when(vaultRepository.listNotes(any())).thenReturn(List.of());
+        when(adventureRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        // Reproduces the live "worlds/test-welt.md" case, plus a couple of
+        // other prefix variants the model has been observed to invent -
+        // none of these mention "content/worlds/{slug}/" verbatim, but all
+        // mirror some part of the vault's own folder structure.
+        when(worldBuildingClient.mergeFactsIntoVault(any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(
+                        new VaultNoteChange("worlds/" + worldSlug + ".md", "Testwelt", "# Testwelt", true),
+                        new VaultNoteChange("worlds/" + worldSlug + "/Locations/Paspaturia.md", "Paspaturia", "# Paspaturia", true),
+                        new VaultNoteChange("Locations/Dorf.md", "Dorf", "# Dorf", true)
+                ));
+
+        WorldFactExtractionService service = new WorldFactExtractionService(adventureRepository, chronicleRepository,
+                worldRepository, worldBuildingClient, vaultRepository, recordingService);
+
+        service.pushFactsToVault(adventureId, "Fakten...");
+
+        ArgumentCaptor<List<VaultFileWrite>> writesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(vaultRepository).commitChanges(any(), writesCaptor.capture());
+        List<String> paths = writesCaptor.getValue().stream().map(VaultFileWrite::path).toList();
+
+        assertThat(paths).containsExactlyInAnyOrder(
+                "content/worlds/test-welt/test-welt.md",
+                "content/worlds/test-welt/Locations/Paspaturia.md",
+                "content/worlds/test-welt/Locations/Dorf.md");
+    }
 }

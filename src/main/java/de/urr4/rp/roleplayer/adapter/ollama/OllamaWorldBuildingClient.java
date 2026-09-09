@@ -107,24 +107,45 @@ public class OllamaWorldBuildingClient implements WorldBuildingClient {
     @Override
     public List<VaultNoteChange> mergeFactsIntoVault(String worldName, String worldSlug, String chronicleName, String adventureName,
                                                       String factsText, List<String> existingNoteSummaries) {
+        String prompt = buildMergePrompt(worldName, worldSlug, chronicleName, adventureName, factsText, existingNoteSummaries);
+        // Prefer an unconstrained call first: small models like llama3.2:3b
+        // produce noticeably richer, more detailed note content (actual
+        // facts, more notes) when not grammar-constrained by a JSON Schema -
+        // the schema keeps them syntactically valid but measurably shrinks
+        // and flattens the generated content (observed empty "content"
+        // fields and far fewer notes in practice). The existing
+        // block-scanning repair logic in parseNoteChanges() already fixes
+        // the most common malformed-JSON patterns these models produce, so
+        // this path succeeds in the large majority of cases.
+        String rawResponse = generate(prompt, null);
+        try {
+            return parseNoteChanges(rawResponse);
+        } catch (RuntimeException e) {
+            // Only if the unconstrained response couldn't be parsed/repaired
+            // at all, retry once with the JSON Schema "format" - this
+            // grammar-constrains Ollama's token sampling to guarantee a
+            // syntactically and structurally valid array of {path,title,
+            // action,content} objects, trading content richness for
+            // guaranteed-parseable structure as a last resort instead of
+            // failing outright. Needs Ollama >= 0.5 (structured outputs).
+            log.warn("Unconstrained Ollama vault-merge response could not be parsed ({}), retrying with a JSON Schema format", e.getMessage());
+            String schemaConstrainedResponse = generate(prompt, NOTE_CHANGES_JSON_SCHEMA);
+            return parseNoteChanges(schemaConstrainedResponse);
+        }
+    }
+
+    private String generate(String prompt, Object format) {
+        Map<String, Object> body = new java.util.HashMap<>(Map.of(
+                "model", model,
+                "prompt", prompt,
+                "stream", false
+        ));
+        if (format != null) {
+            body.put("format", format);
+        }
         OllamaGenerateResponse response = restClient.post()
                 .uri("/api/generate")
-                .body(Map.of(
-                        "model", model,
-                        "prompt", buildMergePrompt(worldName, worldSlug, chronicleName, adventureName, factsText, existingNoteSummaries),
-                        "stream", false,
-                        // Grammar-constrains Ollama's token sampling to the
-                        // given JSON schema, guaranteeing a syntactically and
-                        // structurally valid array of {path,title,action,
-                        // content} objects - independent of how well the
-                        // model would otherwise follow the prompt's format
-                        // instructions. Needs Ollama >= 0.5 (structured
-                        // outputs); the block-scanning repair logic in
-                        // parseNoteChanges() below stays as a defensive
-                        // fallback for older Ollama versions that ignore
-                        // unknown "format" schemas.
-                        "format", NOTE_CHANGES_JSON_SCHEMA
-                ))
+                .body(body)
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, (request, clientResponse) -> {
                     String errorBody = new String(clientResponse.getBody().readAllBytes());
@@ -135,7 +156,7 @@ public class OllamaWorldBuildingClient implements WorldBuildingClient {
         if (response == null || response.response() == null || response.response().isBlank()) {
             throw new IllegalStateException("Ollama returned no world-building response");
         }
-        return parseNoteChanges(response.response());
+        return response.response();
     }
 
     List<VaultNoteChange> parseNoteChanges(String rawResponse) {

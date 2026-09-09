@@ -14,11 +14,11 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @Component
 public class OllamaWorldBuildingClient implements WorldBuildingClient {
@@ -26,7 +26,6 @@ public class OllamaWorldBuildingClient implements WorldBuildingClient {
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
     private static final Duration READ_TIMEOUT = Duration.ofMinutes(10);
     private static final Duration HEALTH_CHECK_TIMEOUT = Duration.ofSeconds(5);
-    private static final Pattern JSON_ARRAY_PATTERN = Pattern.compile("\\[.*]", Pattern.DOTALL);
 
     private final RestClient restClient;
     private final RestClient healthCheckRestClient;
@@ -109,24 +108,38 @@ public class OllamaWorldBuildingClient implements WorldBuildingClient {
     }
 
     List<VaultNoteChange> parseNoteChanges(String rawResponse) {
-        Matcher matcher = JSON_ARRAY_PATTERN.matcher(rawResponse);
-        if (!matcher.find()) {
+        List<String> blocks = findTopLevelJsonBlocks(rawResponse);
+        if (blocks.isEmpty()) {
             throw new IllegalStateException("No valid JSON array found in Ollama response: " + truncateForError(rawResponse));
         }
-        String json = matcher.group();
-        JsonNode arrayNode;
-        try {
-            arrayNode = objectMapper.readTree(json);
-        } catch (Exception e) {
-            throw new IllegalStateException(
-                    "Ollama response is not valid JSON: " + e.getMessage() + " (response: " + truncateForError(json) + ")", e);
-        }
-        if (!arrayNode.isArray()) {
-            throw new IllegalStateException("Expected a JSON array from Ollama but got: " + truncateForError(json));
+
+        List<JsonNode> elements = new ArrayList<>();
+        for (String block : blocks) {
+            // Small/weak models sometimes emit each note as its own
+            // top-level "[ \"path\": ..., \"title\": ... ]" block using
+            // square brackets instead of the requested {"path": ...} object
+            // - and/or several such blocks back-to-back instead of one
+            // JSON array. Detect and repair that specific, consistent
+            // mistake instead of failing outright.
+            String candidate = looksLikeObjectMisusingSquareBrackets(block)
+                    ? "{" + block.substring(1, block.length() - 1) + "}"
+                    : block;
+            JsonNode node;
+            try {
+                node = objectMapper.readTree(candidate);
+            } catch (Exception e) {
+                throw new IllegalStateException(
+                        "Ollama response is not valid JSON: " + e.getMessage() + " (response: " + truncateForError(candidate) + ")", e);
+            }
+            if (node.isArray()) {
+                node.forEach(elements::add);
+            } else {
+                elements.add(node);
+            }
         }
 
         List<VaultNoteChange> changes = new ArrayList<>();
-        for (JsonNode element : arrayNode) {
+        for (JsonNode element : elements) {
             if (!element.isObject()) {
                 // Small/weak models sometimes ignore the requested object
                 // shape and emit a flat array of strings (e.g. the field
@@ -151,6 +164,103 @@ public class OllamaWorldBuildingClient implements WorldBuildingClient {
             }
         }
         return changes;
+    }
+
+    /**
+     * Scans the whole response for balanced top-level {@code [...]}/{@code
+     * {...}} blocks, ignoring any prose text before/between/after them.
+     * Handles nested brackets and quoted strings (including markdown link
+     * syntax like {@code [text](url)} inside a "content" field) correctly by
+     * tracking bracket depth with a single stack across both bracket types.
+     */
+    private static List<String> findTopLevelJsonBlocks(String text) {
+        List<String> blocks = new ArrayList<>();
+        int i = 0;
+        int n = text.length();
+        while (i < n) {
+            char c = text.charAt(i);
+            if (c == '[' || c == '{') {
+                int end = findMatchingBracket(text, i);
+                if (end < 0) {
+                    break;
+                }
+                blocks.add(text.substring(i, end + 1));
+                i = end + 1;
+            } else {
+                i++;
+            }
+        }
+        return blocks;
+    }
+
+    private static int findMatchingBracket(String text, int start) {
+        Deque<Character> stack = new ArrayDeque<>();
+        boolean inString = false;
+        for (int i = start; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (inString) {
+                if (c == '\\') {
+                    i++;
+                } else if (c == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                inString = true;
+            } else if (c == '[' || c == '{') {
+                stack.push(c);
+            } else if (c == ']' || c == '}') {
+                if (stack.isEmpty()) {
+                    return -1;
+                }
+                stack.pop();
+                if (stack.isEmpty()) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * True if a top-level bracket block looks like {@code [ "key": value,
+     * ... ]} - i.e. a single object's fields written directly inside square
+     * brackets instead of curly braces - rather than a genuine array of
+     * objects/values (which would start with {@code [{}, [, "..." (no
+     * colon), a number, true/false/null, or be empty).
+     */
+    private static boolean looksLikeObjectMisusingSquareBrackets(String block) {
+        if (!block.startsWith("[")) {
+            return false;
+        }
+        int i = 1;
+        while (i < block.length() && Character.isWhitespace(block.charAt(i))) {
+            i++;
+        }
+        if (i >= block.length() || block.charAt(i) != '"') {
+            return false;
+        }
+        i++;
+        while (i < block.length()) {
+            char c = block.charAt(i);
+            if (c == '\\') {
+                i += 2;
+                continue;
+            }
+            if (c == '"') {
+                break;
+            }
+            i++;
+        }
+        if (i >= block.length()) {
+            return false;
+        }
+        i++;
+        while (i < block.length() && Character.isWhitespace(block.charAt(i))) {
+            i++;
+        }
+        return i < block.length() && block.charAt(i) == ':';
     }
 
     private static String truncateForError(String text) {

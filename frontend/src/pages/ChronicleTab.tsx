@@ -1435,15 +1435,30 @@ export default function ChronicleTab({
                                           setFactsDraftText(previous => ({ ...previous, [expandedAdventure.id]: event.target.value }))
                                         }
                                       />
-                                      <Button
-                                        variant="contained"
-                                        onClick={() => void handleAddFactsToWorld(expandedAdventure.id)}
-                                        disabled={isPushing}
-                                        startIcon={isPushing ? <CircularProgress size={16} color="inherit" /> : undefined}
-                                        sx={{ alignSelf: 'flex-start' }}
+                                      <Tooltip
+                                        title={
+                                          serviceStatus?.ollamaReachable === false
+                                            ? 'Ollama is unreachable — cannot push facts to the world right now.'
+                                            : 'Push the reviewed facts above into the Obsidian vault'
+                                        }
                                       >
-                                        {isPushing ? 'Pushing…' : 'Add facts to world'}
-                                      </Button>
+                                        <span>
+                                          <Button
+                                            variant="contained"
+                                            onClick={() => void handleAddFactsToWorld(expandedAdventure.id)}
+                                            disabled={isPushing || serviceStatus?.ollamaReachable !== true}
+                                            startIcon={isPushing ? <CircularProgress size={16} color="inherit" /> : undefined}
+                                            sx={{ alignSelf: 'flex-start' }}
+                                          >
+                                            {isPushing ? 'Pushing…' : 'Add facts to world'}
+                                          </Button>
+                                        </span>
+                                      </Tooltip>
+                                      {serviceStatus && !serviceStatus.ollamaReachable && (
+                                        <Typography variant="caption" color="warning.main">
+                                          Ollama unreachable
+                                        </Typography>
+                                      )}
                                     </Stack>
                                   )}
                                 </Box>

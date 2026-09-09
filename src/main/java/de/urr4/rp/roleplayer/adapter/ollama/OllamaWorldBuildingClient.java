@@ -1,6 +1,6 @@
 package de.urr4.rp.roleplayer.adapter.ollama;
 
-import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import de.urr4.rp.roleplayer.domain.model.VaultNoteChange;
 import de.urr4.rp.roleplayer.domain.port.out.WorldBuildingClient;
@@ -14,6 +14,7 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -110,18 +111,53 @@ public class OllamaWorldBuildingClient implements WorldBuildingClient {
     List<VaultNoteChange> parseNoteChanges(String rawResponse) {
         Matcher matcher = JSON_ARRAY_PATTERN.matcher(rawResponse);
         if (!matcher.find()) {
-            throw new IllegalStateException("No valid JSON array found in Ollama response");
+            throw new IllegalStateException("No valid JSON array found in Ollama response: " + truncateForError(rawResponse));
         }
         String json = matcher.group();
+        JsonNode arrayNode;
         try {
-            List<OllamaNoteChangeJson> parsed = objectMapper.readValue(json, new TypeReference<>() {});
-            return parsed.stream()
-                    .filter(change -> isValidRelativePath(change.path()))
-                    .map(change -> new VaultNoteChange(change.path(), change.title(), change.content(), "create".equalsIgnoreCase(change.action())))
-                    .toList();
+            arrayNode = objectMapper.readTree(json);
         } catch (Exception e) {
-            throw new IllegalStateException("Failed to parse Ollama world-building JSON: " + e.getMessage(), e);
+            throw new IllegalStateException(
+                    "Ollama response is not valid JSON: " + e.getMessage() + " (response: " + truncateForError(json) + ")", e);
         }
+        if (!arrayNode.isArray()) {
+            throw new IllegalStateException("Expected a JSON array from Ollama but got: " + truncateForError(json));
+        }
+
+        List<VaultNoteChange> changes = new ArrayList<>();
+        for (JsonNode element : arrayNode) {
+            if (!element.isObject()) {
+                // Small/weak models sometimes ignore the requested object
+                // shape and emit a flat array of strings (e.g. the field
+                // names themselves) instead of {"path": ..., "title": ...}
+                // objects. Fail with a message that points at the actual
+                // model output instead of a cryptic Jackson stack trace.
+                throw new IllegalStateException(
+                        "Ollama returned a JSON array item that is not an object (" + element.getNodeType() + "): "
+                                + truncateForError(element.toString())
+                                + ". The model likely didn't follow the required {\"path\":...,\"title\":...} format - "
+                                + "consider using a more capable OLLAMA_WORLDBUILDING_MODEL.");
+            }
+            OllamaNoteChangeJson change;
+            try {
+                change = objectMapper.treeToValue(element, OllamaNoteChangeJson.class);
+            } catch (Exception e) {
+                throw new IllegalStateException("Failed to parse Ollama world-building JSON item: " + e.getMessage()
+                        + " (item: " + truncateForError(element.toString()) + ")", e);
+            }
+            if (isValidRelativePath(change.path())) {
+                changes.add(new VaultNoteChange(change.path(), change.title(), change.content(), "create".equalsIgnoreCase(change.action())));
+            }
+        }
+        return changes;
+    }
+
+    private static String truncateForError(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.length() > 300 ? text.substring(0, 300) + "..." : text;
     }
 
     private boolean isValidRelativePath(String path) {

@@ -151,7 +151,28 @@ if [[ "${UPDATE_STATE}" == "paused" ]]; then
 fi
 
 echo "==> Updating app service to new image …"
+# `docker service update --force` blocks until the rollout converges or
+# Swarm pauses it due to failing health checks — and if it pauses/errors
+# *during this call*, the command itself exits non-zero. Under `set -e`
+# that would kill the script right here, before ever reaching the step 4
+# diagnostics below — which is exactly why a failed redeploy previously
+# showed nothing but the raw truncated Docker CLI progress line ("service
+# update paused: ...") with no logs or explanation. Capture the exit status
+# instead so we can always print actionable diagnostics before exiting.
+set +e
 docker service update --force --image "${IMAGE}" "${STACK}_app"
+UPDATE_EXIT_CODE=$?
+set -e
+if [[ "${UPDATE_EXIT_CODE}" -ne 0 ]]; then
+  echo ""
+  echo "✗ 'docker service update' failed or paused — the new image is likely failing its healthcheck"
+  echo "  or crashing on startup. Recent logs from the new task:"
+  echo ""
+  docker service logs --tail 200 "${STACK}_app" || true
+  echo ""
+  docker stack ps "${STACK}" --no-trunc
+  exit 1
+fi
 
 # ── 4. Verify the rollout actually converged instead of pausing again ────────
 echo "==> Waiting for rollout to converge …"
@@ -162,8 +183,10 @@ for _ in $(seq 1 30); do
   fi
   if [[ "${STATE}" == "paused" ]]; then
     echo ""
-    echo "✗ Rollout paused again — the new image is failing its healthcheck."
-    echo "  Check logs with: docker service logs ${STACK}_app"
+    echo "✗ Rollout paused again — the new image is failing its healthcheck. Recent logs:"
+    echo ""
+    docker service logs --tail 200 "${STACK}_app" || true
+    echo ""
     docker stack ps "${STACK}" --no-trunc
     exit 1
   fi

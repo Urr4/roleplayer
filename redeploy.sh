@@ -63,8 +63,13 @@ ensure_tls_certificate() {
 ensure_tls_certificate
 
 # ── 1. Build image (ARM64 for Raspberry Pi) ───────────────────────────────────
+# DOCKER_BUILDKIT=1 is required for the Dockerfile's `RUN --mount=type=cache`
+# steps (persistent npm/Gradle dependency caches across builds) to actually
+# take effect — without it, older Docker CLI defaults fall back to the
+# classic builder, which ignores --mount and silently redownloads every
+# dependency from scratch on every redeploy.
 echo "==> Building ${IMAGE} …"
-docker build --platform linux/arm64 -t "${IMAGE}" "${SCRIPT_DIR}"
+DOCKER_BUILDKIT=1 docker build --platform linux/arm64 -t "${IMAGE}" "${SCRIPT_DIR}"
 
 # ── 2. Deploy stack ───────────────────────────────────────────────────────────
 # Swarm cannot hot-swap a running service between networks via

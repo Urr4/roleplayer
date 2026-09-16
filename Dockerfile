@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 1: Build the React/Vite frontend
 # ─────────────────────────────────────────────────────────────────────────────
@@ -5,7 +6,11 @@ FROM mirror.gcr.io/library/node:20-alpine AS frontend-build
 
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
-RUN npm ci
+# --mount=type=cache persists node's npm cache across builds *independent* of
+# layer invalidation, so `npm ci` stays fast even when package-lock.json
+# changes (npm still verifies the lockfile, but skips re-downloading tarballs
+# already present in the cache).
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY frontend/ ./
 RUN npm run build
 
@@ -19,11 +24,25 @@ WORKDIR /app
 COPY gradlew ./
 COPY gradle gradle
 COPY build.gradle settings.gradle ./
+
+# Prime the Gradle wrapper/dependency cache in its own layer, BEFORE the
+# application source is copied in. This is the single biggest lever for
+# redeploy speed: previously `RUN ./gradlew bootJar` sat right after
+# `COPY src src`, so ANY source change invalidated that layer and reran the
+# build against a completely empty Gradle cache — redownloading the Gradle
+# distribution itself plus every dependency (Spring Boot, JDA, opus-java,
+# ...) from Maven Central on every single redeploy. The `--mount=type=cache`
+# below additionally persists ~/.gradle across builds independent of layer
+# invalidation (it survives even when build.gradle/settings.gradle change),
+# so dependency downloads only happen once, ever, per Pi.
+RUN --mount=type=cache,target=/root/.gradle \
+    chmod +x gradlew && ./gradlew --no-daemon dependencies > /dev/null
+
 COPY src src
 COPY frontend/package.json frontend/package-lock.json frontend/
 COPY --from=frontend-build /app/frontend/dist frontend/dist
 
-RUN chmod +x gradlew && \
+RUN --mount=type=cache,target=/root/.gradle \
     ./gradlew bootJar -x test -x installFrontend -x buildFrontend --no-daemon
 
 # ─────────────────────────────────────────────────────────────────────────────

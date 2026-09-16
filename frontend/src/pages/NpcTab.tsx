@@ -1,29 +1,29 @@
 import { useEffect, useState } from 'react';
 import {
+  Alert,
   Autocomplete,
   Button,
-  Chip,
+  CircularProgress,
   Divider,
   Grid,
   IconButton,
   List,
   ListItemButton,
   ListItemText,
-  MenuItem,
   Stack,
   TextField,
   Typography,
 } from '@mui/material';
-import CasinoIcon from '@mui/icons-material/Casino';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import SaveIcon from '@mui/icons-material/Save';
 import CloseIcon from '@mui/icons-material/Close';
 import TornCard from '../components/TornCard';
-import type { AttributePools, ChronicleDto, NpcDto, NpcStatus } from '../types';
+import type { ChronicleDto, NpcDto, ServiceStatusDto } from '../types';
 import {
+  generateNpc,
   getAllNpcs,
-  getAttributePools,
   getChronicleNpcs,
-  getRandomNpc,
+  getServiceStatus,
   importNpcIntoChronicle,
   removeNpcFromChronicle,
   saveNpcInChronicle,
@@ -33,37 +33,46 @@ interface Props {
   chronicle: ChronicleDto;
 }
 
-const STATUS_LABEL: Record<NpcStatus, string> = {
-  HIGHER: 'Higher Standing',
-  EQUAL: 'Equal Standing',
-  LOWER: 'Lower Standing',
-};
-
 const emptyDraft: NpcDto = {
   id: null,
   name: '',
-  motive: '',
-  status: 'EQUAL',
-  mood: '',
+  firstImpression: '',
+  goal: '',
+  attitude: '',
+  rulesAndTaboos: '',
+  quirks: '',
   originChronicleId: null,
   createdAt: null,
 };
 
 export default function NpcTab({ chronicle }: Props) {
-  const [pools, setPools] = useState<AttributePools>({ motives: [], moods: [], statuses: ['HIGHER', 'EQUAL', 'LOWER'] });
   const [chronicleNpcs, setChronicleNpcs] = useState<NpcDto[]>([]);
   const [allNpcs, setAllNpcs] = useState<NpcDto[]>([]);
   const [selected, setSelected] = useState<NpcDto | null>(null);
   const [draft, setDraft] = useState<NpcDto>(emptyDraft);
   const [importTarget, setImportTarget] = useState<NpcDto | null>(null);
+  const [description, setDescription] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [serviceStatus, setServiceStatus] = useState<ServiceStatusDto | null>(null);
 
   const refreshChronicleNpcs = () => getChronicleNpcs(chronicle.id).then(setChronicleNpcs);
   const refreshAllNpcs = () => getAllNpcs().then(setAllNpcs);
 
   useEffect(() => {
-    getAttributePools().then(setPools);
     refreshChronicleNpcs();
     refreshAllNpcs();
+    let cancelled = false;
+    void getServiceStatus()
+      .then(status => {
+        if (!cancelled) setServiceStatus(status);
+      })
+      .catch(() => {
+        if (!cancelled) setServiceStatus({ whisperXReachable: false, ollamaReachable: false });
+      });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chronicle.id]);
 
@@ -75,31 +84,34 @@ export default function NpcTab({ chronicle }: Props) {
   const startNewDraft = () => {
     setSelected(null);
     setDraft(emptyDraft);
+    setDescription('');
+    setGenerationError(null);
   };
 
-  const rollRandomNpc = async () => {
-    const npc = await getRandomNpc();
-    setSelected(null);
-    setDraft(npc);
-  };
-
-  const rollField = (field: 'motive' | 'mood' | 'status') => {
-    if (field === 'motive') {
-      setDraft(d => ({ ...d, motive: pools.motives[Math.floor(Math.random() * pools.motives.length)] }));
-    } else if (field === 'mood') {
-      setDraft(d => ({ ...d, mood: pools.moods[Math.floor(Math.random() * pools.moods.length)] }));
-    } else {
-      setDraft(d => ({ ...d, status: pools.statuses[Math.floor(Math.random() * pools.statuses.length)] }));
+  const handleGenerate = async () => {
+    if (!description.trim()) return;
+    setIsGenerating(true);
+    setGenerationError(null);
+    try {
+      const npc = await generateNpc(draft.name, description.trim());
+      setSelected(null);
+      setDraft(npc);
+    } catch {
+      setGenerationError('NPC-Generierung fehlgeschlagen. Ist Ollama erreichbar?');
+    } finally {
+      setIsGenerating(false);
     }
   };
 
   const handleSave = async () => {
-    if (!draft.name.trim() || !draft.motive.trim() || !draft.mood.trim()) return;
+    if (!draft.name.trim() || !draft.firstImpression.trim()) return;
     await saveNpcInChronicle(chronicle.id, {
       name: draft.name.trim(),
-      motive: draft.motive,
-      status: draft.status,
-      mood: draft.mood,
+      firstImpression: draft.firstImpression,
+      goal: draft.goal,
+      attitude: draft.attitude,
+      rulesAndTaboos: draft.rulesAndTaboos,
+      quirks: draft.quirks,
     });
     startNewDraft();
     refreshChronicleNpcs();
@@ -120,6 +132,7 @@ export default function NpcTab({ chronicle }: Props) {
   };
 
   const importableNpcs = allNpcs.filter(npc => !chronicleNpcs.some(linkedNpc => linkedNpc.id === npc.id));
+  const canGenerate = serviceStatus?.ollamaReachable === true;
 
   return (
     <Grid container spacing={3}>
@@ -149,7 +162,7 @@ export default function NpcTab({ chronicle }: Props) {
               onClick={() => selectNpc(npc)}
               sx={{ border: '1px solid rgba(58,36,22,0.3)', mb: 0.5 }}
             >
-              <ListItemText primary={npc.name} secondary={`${npc.motive} · ${npc.mood}`} />
+              <ListItemText primary={npc.name} secondary={npc.goal || npc.attitude} />
               <IconButton
                 size="small"
                 onClick={event => {
@@ -174,79 +187,84 @@ export default function NpcTab({ chronicle }: Props) {
       </Grid>
 
       <Grid size={{ xs: 12, md: 7 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-          <Typography variant="h5">🎭 Conjure an NPC</Typography>
-          <Button variant="contained" color="secondary" size="large" startIcon={<CasinoIcon />} onClick={rollRandomNpc} sx={{ px: 3, boxShadow: 'none' }}>
-            Random NPC
-          </Button>
-        </Stack>
+        <Typography variant="h5" gutterBottom>
+          🎭 Conjure an NPC
+        </Typography>
 
-        <TornCard rotate={-0.5} sx={{ maxWidth: 520 }}>
+        <TornCard rotate={-0.5} sx={{ maxWidth: 560 }}>
           <Stack spacing={2}>
             <TextField label="Name" value={draft.name} onChange={event => setDraft(d => ({ ...d, name: event.target.value }))} fullWidth />
 
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Autocomplete
-                freeSolo
-                sx={{ flexGrow: 1 }}
-                options={pools.motives}
-                value={draft.motive}
-                onInputChange={(_, value) => setDraft(d => ({ ...d, motive: value }))}
-                renderInput={params => <TextField {...params} label="Motive" size="small" />}
-              />
-              <IconButton onClick={() => rollField('motive')} title="Roll a random motive">
-                <CasinoIcon />
-              </IconButton>
-            </Stack>
-
-            <Stack direction="row" spacing={1} alignItems="center">
+            <Stack direction="row" spacing={1} alignItems="flex-start">
               <TextField
-                select
-                label="Standing"
-                value={draft.status}
-                onChange={event => setDraft(d => ({ ...d, status: event.target.value as NpcStatus }))}
+                label="Kurzbeschreibung (z.B. freundlicher Händler)"
+                value={description}
+                onChange={event => setDescription(event.target.value)}
                 size="small"
                 fullWidth
-              >
-                {pools.statuses.map(status => (
-                  <MenuItem key={status} value={status}>
-                    {STATUS_LABEL[status]}
-                  </MenuItem>
-                ))}
-              </TextField>
-              <IconButton onClick={() => rollField('status')} title="Roll a random standing">
-                <CasinoIcon />
-              </IconButton>
-            </Stack>
-
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Autocomplete
-                freeSolo
-                sx={{ flexGrow: 1 }}
-                options={pools.moods}
-                value={draft.mood}
-                onInputChange={(_, value) => setDraft(d => ({ ...d, mood: value }))}
-                renderInput={params => <TextField {...params} label="Mood" size="small" />}
               />
-              <IconButton onClick={() => rollField('mood')} title="Roll a random mood">
-                <CasinoIcon />
-              </IconButton>
+              <Button
+                variant="contained"
+                color="secondary"
+                onClick={handleGenerate}
+                disabled={!description.trim() || !canGenerate || isGenerating}
+                startIcon={isGenerating ? <CircularProgress size={16} color="inherit" /> : <AutoAwesomeIcon />}
+                sx={{ whiteSpace: 'nowrap', boxShadow: 'none' }}
+              >
+                Mit KI generieren
+              </Button>
             </Stack>
 
-            {draft.motive && draft.mood && (
-              <Stack direction="row" spacing={1}>
-                <Chip label={draft.motive} color="primary" variant="outlined" />
-                <Chip label={STATUS_LABEL[draft.status]} color="secondary" variant="outlined" />
-                <Chip label={draft.mood} variant="outlined" />
-              </Stack>
+            {serviceStatus && !canGenerate && (
+              <Alert severity="warning">Ollama ist gerade nicht erreichbar — KI-Generierung nicht möglich.</Alert>
             )}
+            {generationError && <Alert severity="error">{generationError}</Alert>}
+
+            <TextField
+              label="Erster Eindruck (Optik/Stimme)"
+              value={draft.firstImpression}
+              onChange={event => setDraft(d => ({ ...d, firstImpression: event.target.value }))}
+              multiline
+              minRows={2}
+              fullWidth
+            />
+            <TextField
+              label="Ziel"
+              value={draft.goal}
+              onChange={event => setDraft(d => ({ ...d, goal: event.target.value }))}
+              multiline
+              minRows={2}
+              fullWidth
+            />
+            <TextField
+              label="Haltung"
+              value={draft.attitude}
+              onChange={event => setDraft(d => ({ ...d, attitude: event.target.value }))}
+              fullWidth
+            />
+            <TextField
+              label="Regeln und Tabus"
+              value={draft.rulesAndTaboos}
+              onChange={event => setDraft(d => ({ ...d, rulesAndTaboos: event.target.value }))}
+              multiline
+              minRows={2}
+              fullWidth
+            />
+            <TextField
+              label="Eigenheiten und Marotten"
+              value={draft.quirks}
+              onChange={event => setDraft(d => ({ ...d, quirks: event.target.value }))}
+              multiline
+              minRows={2}
+              fullWidth
+            />
 
             <Stack direction="row" spacing={1}>
               <Button
                 variant="contained"
                 startIcon={<SaveIcon />}
                 onClick={handleSave}
-                disabled={!draft.name.trim() || !draft.motive.trim() || !draft.mood.trim()}
+                disabled={!draft.name.trim() || !draft.firstImpression.trim()}
               >
                 Pin to board
               </Button>

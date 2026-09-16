@@ -48,22 +48,16 @@ export interface AdventureCharacterDto {
   addedAt: string;
 }
 
-export type NpcStatus = 'HIGHER' | 'EQUAL' | 'LOWER';
-
 export interface NpcDto {
   id: string | null;
   name: string;
-  motive: string;
-  status: NpcStatus;
-  mood: string;
+  firstImpression: string;
+  goal: string;
+  attitude: string;
+  rulesAndTaboos: string;
+  quirks: string;
   originChronicleId: string | null;
   createdAt: string | null;
-}
-
-export interface AttributePools {
-  motives: string[];
-  moods: string[];
-  statuses: NpcStatus[];
 }
 
 export type RecordingSource = 'UPLOAD' | 'MICROPHONE' | 'DISCORD';

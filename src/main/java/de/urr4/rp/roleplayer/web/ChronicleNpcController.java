@@ -33,8 +33,8 @@ public class ChronicleNpcController {
 
     @PostMapping
     public NpcDto create(@PathVariable String chronicleId, @Valid @RequestBody CreateNpcRequest request) {
-        return NpcDto.from(npcService.saveNpcInChronicle(chronicleId, request.name(), request.motive(),
-                request.status(), request.mood()));
+        return NpcDto.from(npcService.saveNpcInChronicle(chronicleId, request.name(), request.firstImpression(),
+                request.goal(), request.attitude(), request.rulesAndTaboos(), request.quirks()));
     }
 
     @PostMapping("/import")

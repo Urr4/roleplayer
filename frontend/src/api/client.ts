@@ -2,7 +2,6 @@ import axios from 'axios';
 import type {
   AdventureCharacterDto,
   AdventureDto,
-  AttributePools,
   CharacterDto,
   ChronicleDto,
   WorldDto,
@@ -107,16 +106,16 @@ export const removeAdventureCharacter = (adventureId: string, characterId: strin
 // ── NPCs ──────────────────────────────────────────────────────────────────────
 export const getAllNpcs = () => api.get<NpcDto[]>('/npcs').then(r => r.data);
 
-export const getRandomNpc = (name?: string) =>
-  api.get<NpcDto>('/npcs/random', { params: { name } }).then(r => r.data);
-
-export const getAttributePools = () => api.get<AttributePools>('/npcs/attribute-pools').then(r => r.data);
+export const generateNpc = (name: string, description: string) =>
+  api.post<NpcDto>('/npcs/generate', { name, description }).then(r => r.data);
 
 export const getChronicleNpcs = (chronicleId: string) =>
   api.get<NpcDto[]>(`/chronicles/${chronicleId}/npcs`).then(r => r.data);
 
-export const saveNpcInChronicle = (chronicleId: string, npc: Pick<NpcDto, 'name' | 'motive' | 'status' | 'mood'>) =>
-  api.post<NpcDto>(`/chronicles/${chronicleId}/npcs`, npc).then(r => r.data);
+export const saveNpcInChronicle = (
+  chronicleId: string,
+  npc: Pick<NpcDto, 'name' | 'firstImpression' | 'goal' | 'attitude' | 'rulesAndTaboos' | 'quirks'>,
+) => api.post<NpcDto>(`/chronicles/${chronicleId}/npcs`, npc).then(r => r.data);
 
 export const importNpcIntoChronicle = (chronicleId: string, npcId: string) =>
   api.post(`/chronicles/${chronicleId}/npcs/import`, { id: npcId });

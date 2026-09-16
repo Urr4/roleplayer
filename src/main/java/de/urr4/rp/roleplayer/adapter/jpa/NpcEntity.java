@@ -1,10 +1,9 @@
 package de.urr4.rp.roleplayer.adapter.jpa;
 
-import de.urr4.rp.roleplayer.domain.model.NpcStatus;
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
@@ -18,12 +17,22 @@ public class NpcEntity {
 
     private String name;
 
-    private String motive;
+    @Lob
+    @Column(name = "first_impression")
+    private String firstImpression;
 
-    @Enumerated(EnumType.STRING)
-    private NpcStatus status;
+    @Lob
+    private String goal;
 
-    private String mood;
+    @Lob
+    private String attitude;
+
+    @Lob
+    @Column(name = "rules_and_taboos")
+    private String rulesAndTaboos;
+
+    @Lob
+    private String quirks;
 
     private String originChronicleId;
 
@@ -32,13 +41,15 @@ public class NpcEntity {
     protected NpcEntity() {
     }
 
-    public NpcEntity(String id, String name, String motive, NpcStatus status, String mood, String originChronicleId,
-                      Instant createdAt) {
+    public NpcEntity(String id, String name, String firstImpression, String goal, String attitude,
+                      String rulesAndTaboos, String quirks, String originChronicleId, Instant createdAt) {
         this.id = id;
         this.name = name;
-        this.motive = motive;
-        this.status = status;
-        this.mood = mood;
+        this.firstImpression = firstImpression;
+        this.goal = goal;
+        this.attitude = attitude;
+        this.rulesAndTaboos = rulesAndTaboos;
+        this.quirks = quirks;
         this.originChronicleId = originChronicleId;
         this.createdAt = createdAt;
     }
@@ -51,16 +62,24 @@ public class NpcEntity {
         return name;
     }
 
-    public String getMotive() {
-        return motive;
+    public String getFirstImpression() {
+        return firstImpression;
     }
 
-    public NpcStatus getStatus() {
-        return status;
+    public String getGoal() {
+        return goal;
     }
 
-    public String getMood() {
-        return mood;
+    public String getAttitude() {
+        return attitude;
+    }
+
+    public String getRulesAndTaboos() {
+        return rulesAndTaboos;
+    }
+
+    public String getQuirks() {
+        return quirks;
     }
 
     public String getOriginChronicleId() {

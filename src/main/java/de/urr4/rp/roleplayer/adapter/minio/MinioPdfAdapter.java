@@ -6,11 +6,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
-import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
-import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
@@ -30,7 +27,7 @@ public class MinioPdfAdapter implements PdfStore {
         this.s3Client = s3Client;
         this.presigner = presigner;
         this.bucket = bucket;
-        ensureBucketExists();
+        MinioBucketReadiness.ensureBucketExists(s3Client, bucket);
     }
 
     @Override
@@ -63,13 +60,5 @@ public class MinioPdfAdapter implements PdfStore {
     @Override
     public void delete(String objectKey) {
         s3Client.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(objectKey).build());
-    }
-
-    private void ensureBucketExists() {
-        try {
-            s3Client.headBucket(HeadBucketRequest.builder().bucket(bucket).build());
-        } catch (NoSuchBucketException e) {
-            s3Client.createBucket(CreateBucketRequest.builder().bucket(bucket).build());
-        }
     }
 }
